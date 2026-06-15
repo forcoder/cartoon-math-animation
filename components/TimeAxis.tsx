@@ -1,20 +1,24 @@
 'use client';
 
-import { useState } from 'react';
-
 interface TimeAxisProps {
   duration: number;
   currentTime: number;
+  isPlaying: boolean;
   onSeek: (t: number) => void;
+  onTogglePlay: () => void;
 }
 
-export default function TimeAxis({ duration, currentTime, onSeek }: TimeAxisProps) {
-  const [playing, setPlaying] = useState(false);
+export default function TimeAxis({
+  duration,
+  currentTime,
+  isPlaying,
+  onSeek,
+  onTogglePlay,
+}: TimeAxisProps) {
   const safeDuration = duration > 0 ? duration : 30;
   const ratio = Math.min(1, Math.max(0, currentTime / safeDuration));
 
   const handleReset = () => {
-    setPlaying(false);
     onSeek(0);
   };
 
@@ -22,11 +26,11 @@ export default function TimeAxis({ duration, currentTime, onSeek }: TimeAxisProp
     <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
       <button
         type="button"
-        onClick={() => setPlaying((p) => !p)}
-        aria-label={playing ? '暂停' : '播放'}
+        onClick={onTogglePlay}
+        aria-label={isPlaying ? '暂停' : '播放'}
         className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700"
       >
-        {playing ? (
+        {isPlaying ? (
           <span className="block h-3 w-3 border-l-4 border-r-4 border-l-transparent border-r-transparent" />
         ) : (
           <span className="ml-0.5 block h-0 w-0 border-y-4 border-l-6 border-y-transparent border-l-white" />

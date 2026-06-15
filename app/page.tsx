@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import InputBox from '@/components/InputBox';
 import AnimationCanvas from '@/components/AnimationCanvas';
 import LoadingState from '@/components/LoadingState';
@@ -16,6 +16,10 @@ type ViewName = 'default' | 'top' | 'side';
 const DEFAULT_PROBLEM =
   '一根长为12cm的木棒，按1:2的比例切分,切分点为O,现将木棒绕点O旋转180度，木棒扫过的面积为多少平方cm?';
 
+const DEFAULT_DURATION = 30;
+const PLAYHEAD_STEP_SECONDS = 0.1;
+const PLAYHEAD_TICK_MS = 100;
+
 export default function HomePage() {
   const [problem, setProblem] = useState(DEFAULT_PROBLEM);
   const [inviteCode, setInviteCode] = useState('founder');
@@ -26,8 +30,38 @@ export default function HomePage() {
   const [steps, setSteps] = useState<RenderStep[]>([]);
   const [lines, setLines] = useState<RenderLine[]>([]);
   const [view, setView] = useState<ViewName>('default');
-  const [duration, setDuration] = useState(30);
+  const [duration, setDuration] = useState(DEFAULT_DURATION);
   const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  // Refs to break the playhead-rAF → setState → re-render cycle without
+  // a stale-closure. The interval reads isPlaying/duration from refs
+  // (always current) and writes to currentTime state.
+  const isPlayingRef = useRef(isPlaying);
+  const durationRef = useRef(duration);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
+
+  // Playhead: when isPlaying, advance currentTime every 100ms. Auto-stop
+  // at the end so the user doesn't have to manually pause.
+  useEffect(() => {
+    if (!isPlaying) return;
+    const id = setInterval(() => {
+      setCurrentTime((t) => {
+        const next = t + PLAYHEAD_STEP_SECONDS;
+        if (next >= durationRef.current) {
+          setIsPlaying(false);
+          return durationRef.current;
+        }
+        return next;
+      });
+    }, PLAYHEAD_TICK_MS);
+    return () => clearInterval(id);
+  }, [isPlaying]);
 
   const handleSubmit = useCallback(async () => {
     if (!problem.trim() || !inviteCode.trim()) return;
@@ -58,9 +92,20 @@ export default function HomePage() {
         duration?: number;
       };
       setCode(data.code);
-      setSteps(Array.isArray(data.steps) ? data.steps : []);
+      const fetchedSteps = Array.isArray(data.steps) ? data.steps : [];
+      setSteps(fetchedSteps);
       setLines(Array.isArray(data.lines) ? data.lines : []);
-      if (data.duration) setDuration(data.duration);
+      // Drive the time axis off the LLM's own step timeline. If the
+      // model returned no steps, fall back to the configured default
+      // (or the LLM-supplied duration).
+      if (fetchedSteps.length > 0) {
+        const lastT = fetchedSteps[fetchedSteps.length - 1].t;
+        setDuration(Math.max(data.duration ?? 0, lastT + 1));
+      } else if (data.duration) {
+        setDuration(data.duration);
+      }
+      setCurrentTime(0);
+      setIsPlaying(false);
       setStatus('success');
     } catch (e: unknown) {
       const msg =
@@ -87,6 +132,21 @@ export default function HomePage() {
     setStatus('error');
   }, []);
 
+  const handleSeek = useCallback((t: number) => {
+    setCurrentTime(t);
+  }, []);
+
+  const handleTogglePlay = useCallback(() => {
+    setIsPlaying((p) => {
+      // If we hit the end, restart from 0 on play.
+      if (!p && currentTime >= duration) {
+        setCurrentTime(0);
+        return true;
+      }
+      return !p;
+    });
+  }, [currentTime, duration]);
+
   const showCanvas = status === 'success' && code !== null;
 
   return (
@@ -112,7 +172,7 @@ export default function HomePage() {
         {showCanvas && <AnimationCanvas code={code} view={view} lines={lines} onError={handleMountError} />}
       </section>
       {showCanvas && (
-        <StepsPanel steps={steps} />
+        <StepsPanel steps={steps} currentTime={currentTime} />
       )}
       {showCanvas && (
         <details className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
@@ -127,7 +187,13 @@ export default function HomePage() {
       {showCanvas && (
         <div className="flex flex-col gap-3">
           <ViewPresets value={view} onChange={setView} />
-          <TimeAxis duration={duration} currentTime={currentTime} onSeek={setCurrentTime} />
+          <TimeAxis
+            duration={duration}
+            currentTime={currentTime}
+            isPlaying={isPlaying}
+            onSeek={handleSeek}
+            onTogglePlay={handleTogglePlay}
+          />
         </div>
       )}
     </main>

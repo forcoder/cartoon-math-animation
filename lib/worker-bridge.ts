@@ -180,7 +180,7 @@ export async function mountAnimation(
     position?: [number, number, number],
     color?: number,
   ): Sprite => {
-    const sprite = makeTextSprite(text, { color });
+    const sprite = makeTextSprite(THREE, text, { color });
     if (position) sprite.position.set(position[0], position[1], position[2]);
     labelSprites.push(sprite);
     return sprite;
@@ -252,7 +252,7 @@ export async function mountAnimation(
       innerCleanup();
     } finally {
       for (const s of labelSprites) {
-        disposeTextSprite(s);
+        disposeTextSprite(THREE, s);
       }
       labelSprites.length = 0;
     }
