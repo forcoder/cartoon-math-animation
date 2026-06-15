@@ -1,0 +1,170 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const w = canvas.clientWidth || 800;
+  const h = canvas.clientHeight || 600;
+  renderer.setSize(w, h, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 200);
+  camera.position.set(0, 3, 10);
+  camera.lookAt(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(5, 8, 6);
+  scene.add(sun);
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(14, 2),
+    new THREE.MeshStandardMaterial({ color: 0xd1fae5 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.05;
+  scene.add(ground);
+
+  // Road
+  const road = new THREE.Mesh(
+    new THREE.PlaneGeometry(12, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x94a3b8 })
+  );
+  road.rotation.x = -Math.PI / 2;
+  road.position.y = 0.01;
+  scene.add(road);
+
+  // Markers along road
+  for (let i = 0; i <= 10; i++) {
+    const mark = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.02, 0.15),
+      new THREE.MeshStandardMaterial({ color: 0xffffff })
+    );
+    mark.position.set(-6 + i * 1.2, 0.03, 0);
+    scene.add(mark);
+  }
+
+  // A and B labels (small boxes as landmarks)
+  const landmarkA = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.6, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x3b82f6 })
+  );
+  landmarkA.position.set(-5.5, 0.3, 0);
+  scene.add(landmarkA);
+
+  const landmarkB = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.6, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x3b82f6 })
+  );
+  landmarkB.position.set(5.5, 0.3, 0);
+  scene.add(landmarkB);
+
+  // 小明 (from A to B) - red sphere
+  const xiaoming = new THREE.Mesh(
+    new THREE.SphereGeometry(0.25, 32, 16),
+    new THREE.MeshStandardMaterial({ color: 0xef4444 })
+  );
+  xiaoming.position.set(-5.5, 0.25, 0);
+  scene.add(xiaoming);
+
+  // 小华 (from B to A) - orange sphere
+  const xiaohua = new THREE.Mesh(
+    new THREE.SphereGeometry(0.25, 32, 16),
+    new THREE.MeshStandardMaterial({ color: 0xf97316 })
+  );
+  xiaohua.position.set(5.5, 0.25, 0);
+  scene.add(xiaohua);
+
+  // Trail markers
+  const xiaomingTrail = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 16, 8),
+    new THREE.MeshStandardMaterial({ color: 0xfca5a5 })
+  );
+  xiaomingTrail.visible = false;
+  scene.add(xiaomingTrail);
+
+  const xiaohuaTrail = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 16, 8),
+    new THREE.MeshStandardMaterial({ color: 0xfed7aa })
+  );
+  xiaohuaTrail.visible = false;
+  scene.add(xiaohuaTrail);
+
+  // Meeting point indicator (hidden initially)
+  const meetMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.15, 16, 8),
+    new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x22c55e, emissiveIntensity: 0.5 })
+  );
+  meetMarker.visible = false;
+  scene.add(meetMarker);
+
+  // Problem parameters
+  const totalDist = 100; // km
+  const vMing = 4; // km/h
+  const vHua = 6; // km/h
+  const meetTime = totalDist / (vMing + vHua); // 10 hours
+  const meetRatio = vMing / (vMing + vHua); // 0.4 from A
+
+  // Visual scale: 100km maps to 11 units
+  const visualSpan = 11;
+  const startA = -visualSpan / 2;
+  const startB = visualSpan / 2;
+  const meetX = startA + meetRatio * visualSpan;
+
+  // Animation duration in seconds
+  const animDuration = 8;
+  const holdDuration = 1.5;
+  const totalCycle = animDuration + holdDuration;
+
+  let stopped = false;
+  let paused = false;
+  const clock = new THREE.Clock();
+
+  function tick() {
+    if (stopped) return;
+    if (!paused) {
+      let elapsed = clock.getElapsedTime() % totalCycle;
+
+      // Trail update
+      if (elapsed > 0.1) {
+        xiaomingTrail.visible = true;
+        xiaomingTrail.position.copy(xiaoming.position);
+        xiaomingTrail.position.y = 0.05;
+      }
+      if (elapsed > 0.1) {
+        xiaohuaTrail.visible = true;
+        xiaohuaTrail.position.copy(xiaohua.position);
+        xiaohuaTrail.position.y = 0.05;
+      }
+
+      if (elapsed <= animDuration) {
+        const k = elapsed / animDuration;
+        // Ease in-out
+        const ease = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+
+        xiaoming.position.x = startA + ease * (meetX - startA);
+        xiaohua.position.x = startB - ease * (startB - meetX);
+
+        meetMarker.visible = false;
+      } else {
+        // Hold at meeting point
+        xiaoming.position.x = meetX;
+        xiaohua.position.x = meetX;
+        meetMarker.position.set(meetX, 0.5, 0);
+        meetMarker.visible = true;
+        // Pulse the meeting marker
+        const pulse = 0.8 + 0.3 * Math.sin(elapsed * 6);
+        meetMarker.scale.set(pulse, pulse, pulse);
+      }
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}

@@ -1,0 +1,246 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+  camera.position.set(0, 3, 7);
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(12, 4),
+    new THREE.MeshStandardMaterial({ color: 0xd1fae5 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  scene.add(ground);
+
+  // Tank (open-top box)
+  const tankGeo = new THREE.BoxGeometry(2, 2, 0.15);
+  const tankMat = new THREE.MeshStandardMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.5 });
+  const tank = new THREE.Mesh(tankGeo, tankMat);
+  tank.position.y = 1;
+  scene.add(tank);
+
+  // Water inside tank (grows)
+  const waterGeo = new THREE.BoxGeometry(1.9, 0.01, 0.1);
+  const waterMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.7 });
+  const water = new THREE.Mesh(waterGeo, waterMat);
+  water.position.y = 0.05;
+  scene.add(water);
+
+  // Pipe A (inlet) — green, on top-left
+  const pipeA = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.08, 1.2, 16),
+    new THREE.MeshStandardMaterial({ color: 0x22c55e })
+  );
+  pipeA.position.set(-0.6, 2.6, 0);
+  scene.add(pipeA);
+
+  // Pipe B (outlet) — red, on bottom-right
+  const pipeB = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.08, 0.8, 16),
+    new THREE.MeshStandardMaterial({ color: 0xef4444 })
+  );
+  pipeB.position.set(0.6, 0.4, 0);
+  scene.add(pipeB);
+
+  // Labels as small spheres
+  const labelA = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0x22c55e })
+  );
+  labelA.position.set(-0.6, 3.3, 0);
+  scene.add(labelA);
+
+  const labelB = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xef4444 })
+  );
+  labelB.position.set(0.6, 0.9, 0);
+  scene.add(labelB);
+
+  // Water drops from pipe A
+  const drops = [];
+  for (let i = 0; i < 6; i++) {
+    const drop = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.8 })
+    );
+    drop.visible = false;
+    scene.add(drop);
+    drops.push(drop);
+  }
+
+  // Water drops from pipe B (drain)
+  const drainDrops = [];
+  for (let i = 0; i < 4; i++) {
+    const drop = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0xfca5a5, transparent: true, opacity: 0.8 })
+    );
+    drop.visible = false;
+    scene.add(drop);
+    drainDrops.push(drop);
+  }
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  // Math: 甲管 rate = 1/6 per hour, 乙管 rate = -1/4 per hour
+  // Net rate = 1/6 - 1/4 = (2-3)/12 = -1/12 ... wait that's negative
+  // Actually: 1/6 - 1/4 = -1/12 means it drains. Let me re-read.
+  // 甲管6小时注满 → rate = 1/6, 乙管4小时放空 → rate = 1/4 (out)
+  // Net = 1/6 - 1/4 = -1/12 → this drains, never fills!
+  // But the problem says "多久注满" implying it does fill. 
+  // Common variant: 甲管6小时注满，乙管8小时放空 → net = 1/6 - 1/8 = 1/24 → 24h
+  // OR: 甲管4小时注满，乙管6小时放空 → net = 1/4 - 1/6 = 1/12 → 12h
+  // The problem states 甲6h fill, 乙4h drain. Net = 1/6 - 1/4 = -1/12.
+  // This means the pool drains. But the question asks "多久注满".
+  // I'll animate it as stated: show that water level decreases, then show the answer.
+  // Actually, let me re-read: maybe 甲 fills in 6h and 乙 drains in 4h.
+  // Net rate = 1/6 - 1/4 = -1/12 per hour. Pool empties in 12 hours.
+  // The answer: it will never fill; instead it drains. The time to drain is 12 hours.
+  // But this is an elementary school problem, so likely the intended interpretation
+  // is that the numbers work out positively. Let me just animate what the problem says.
+  // I'll show the water level and animate the net effect.
+  // Since net is negative, I'll show water draining from full to empty.
+  // Answer: 12 hours to drain (or "never fills, drains in 12 hours")
+  
+  // For animation: start full, drain over the duration
+  // Actually, let me reconsider. Maybe the problem means:
+  // 甲管单独开6小时注满, 乙管单独开4小时放空
+  // Both open: net = 1/6 - 1/4 = -1/12
+  // This drains. Time to empty = 12 hours.
+  // I'll animate starting from full, draining to empty, showing answer = 12 hours.
+  
+  // Let me animate: water starts at some level and drains
+  // Actually for a more interesting visual, let me show it starting empty,
+  // the inlet trying to fill but the outlet draining faster,
+  // so water level stays low / drains.
+  
+  // Better approach: animate water level going from full to empty
+  // representing the net drain over 12 hours.
+  
+  const totalDuration = 8; // seconds for animation
+  const answerTime = 12; // hours to drain (or -12 meaning it drains)
+  
+  let stopped = false;
+  let paused = false;
+  const clock = new THREE.Clock();
+  let elapsed = 0;
+  let phase = 'animate'; // 'animate' | 'hold' | 'reset'
+  let holdTimer = 0;
+  const holdDuration = 2;
+  let loopCount = 0;
+
+  // Water starts full (representing the pool was full, now both pipes open)
+  // Actually let me re-think: the problem asks "多久注满" (how long to fill)
+  // Starting from empty, with both pipes open, net rate = 1/6 - 1/4 = -1/12
+  // It will NEVER fill. The answer is that it drains instead.
+  // For elementary school, the answer might be "never fills" or they might
+  // have intended different numbers. But I must use the given numbers.
+  
+  // I'll animate: show water trying to fill but draining, 
+  // with the water level going down from full to empty.
+  // Start: water at top (full), End: water at bottom (empty)
+  // This shows the net effect: draining over 12 hours.
+  
+  // Set initial water level to full
+  water.scale.y = 1;
+  water.position.y = 0.05;
+
+  // Drop animation timers
+  let dropTimerA = 0;
+  let dropTimerB = 0;
+  let dropIndexA = 0;
+  let dropIndexB = 0;
+
+  function tick() {
+    if (stopped) return;
+    if (!paused) {
+      const dt = clock.getDelta();
+      elapsed += dt;
+
+      if (phase === 'animate') {
+        const t = Math.min(elapsed, totalDuration);
+        const k = t / totalDuration; // 0 to 1
+
+        // Water drains from full (scale.y = 1) to empty (scale.y = 0.01)
+        const waterLevel = 1 - k;
+        water.scale.y = Math.max(waterLevel, 0.01);
+        water.position.y = 0.05;
+
+        // Animate drops from pipe A (inlet - trying to fill)
+        dropTimerA += dt;
+        if (dropTimerA > 0.15) {
+          dropTimerA = 0;
+          const drop = drops[dropIndexA % drops.length];
+          drop.visible = true;
+          drop.position.set(-0.6, 2.0, 0);
+          drop.userData = { vy: -1.5, life: 1.0 };
+          dropIndexA++;
+        }
+
+        // Animate drops from pipe B (outlet - draining, more active)
+        dropTimerB += dt;
+        if (dropTimerB > 0.1) {
+          dropTimerB = 0;
+          const drop = drainDrops[dropIndexB % drainDrops.length];
+          drop.visible = true;
+          drop.position.set(0.6, 0.8, 0);
+          drop.userData = { vy: 1.5, life: 1.0 };
+          dropIndexB++;
+        }
+
+        // Update drops
+        for (const drop of drops) {
+          if (drop.visible) {
+            drop.position.y += drop.userData.vy * dt;
+            drop.userData.life -= dt * 1.5;
+            if (drop.userData.life <= 0 || drop.position.y < 0.05) {
+              drop.visible = false;
+            }
+          }
+        }
+        for (const drop of drainDrops) {
+          if (drop.visible) {
+            drop.position.y += drop.userData.vy * dt;
+            drop.userData.life -= dt * 1.5;
+            if (drop.userData.life <= 0 || drop.position.y > 1.5) {
+              drop.visible = false;
+            }
+          }
+        }
+
+        if (t >= totalDuration) {
+          phase = 'hold';
+          holdTimer = 0;
+        }
+      } else if (phase === 'hold') {
+        holdTimer += dt;
+        if (holdTimer >= holdDuration) {
+          phase = 'reset';
+        }
+      } else if (phase === 'reset') {
+        elapsed = 0;
+        phase = 'animate';
+        water.scale.y = 1;
+        water.position.y = 0.05;
+        loopCount++;
+      }
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}

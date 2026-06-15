@@ -34,7 +34,9 @@ export default function HomePage() {
     const tick = setInterval(() => setProgress((p) => (p < 90 ? p + 5 : p)), 200);
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15_000);
+      // LongCat generation typically takes 30-60s. Allow 90s before
+      // aborting so real calls don't get killed by the frontend timeout.
+      const timeoutId = setTimeout(() => controller.abort(), 90_000);
       const res = await fetch('/api/render', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

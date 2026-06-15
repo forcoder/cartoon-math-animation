@@ -1,0 +1,231 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+  camera.position.set(0, 3, 7);
+  camera.lookAt(0, 0.5, 0);
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(12, 6),
+    new THREE.MeshStandardMaterial({ color: 0xd1fae5 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  scene.add(ground);
+
+  // Tank (open-top box) — wireframe edges + transparent walls
+  const tankW = 2.4, tankH = 2.0, tankD = 1.6;
+  const tankGroup = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.45 });
+  // Back wall
+  const backWall = new THREE.Mesh(new THREE.PlaneGeometry(tankW, tankH), wallMat);
+  backWall.position.set(0, tankH / 2, -tankD / 2);
+  tankGroup.add(backWall);
+  // Left wall
+  const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(tankD, tankH), wallMat);
+  leftWall.position.set(-tankW / 2, tankH / 2, 0);
+  leftWall.rotation.y = Math.PI / 2;
+  tankGroup.add(leftWall);
+  // Right wall
+  const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(tankD, tankH), wallMat);
+  rightWall.position.set(tankW / 2, tankH / 2, 0);
+  rightWall.rotation.y = Math.PI / 2;
+  tankGroup.add(rightWall);
+  // Bottom
+  const bottom = new THREE.Mesh(new THREE.PlaneGeometry(tankW, tankD), new THREE.MeshStandardMaterial({ color: 0x60a5fa }));
+  bottom.rotation.x = -Math.PI / 2;
+  bottom.position.y = 0;
+  tankGroup.add(bottom);
+  // Edges
+  const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(tankW, tankH, tankD));
+  const edges = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: 0x1e40af }));
+  edges.position.y = tankH / 2;
+  tankGroup.add(edges);
+  scene.add(tankGroup);
+
+  // Water (grows from bottom)
+  const waterMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.7 });
+  const water = new THREE.Mesh(new THREE.BoxGeometry(tankW - 0.05, 0.01, tankD - 0.05), waterMat);
+  water.position.set(0, 0.005, 0);
+  scene.add(water);
+
+  // Pipe A (inlet, left side) — blue
+  const pipeA = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.12, 0.12, 1.2, 16),
+    new THREE.MeshStandardMaterial({ color: 0x2563eb })
+  );
+  pipeA.position.set(-tankW / 2 - 0.5, 2.2, 0);
+  scene.add(pipeA);
+  // Pipe A label
+  const pipeALabel = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.25, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0x2563eb })
+  );
+  pipeALabel.position.set(-tankW / 2 - 0.5, 2.9, 0);
+  scene.add(pipeALabel);
+
+  // Pipe B (outlet, right side) — orange
+  const pipeB = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.12, 0.12, 1.2, 16),
+    new THREE.MeshStandardMaterial({ color: 0xf97316 })
+  );
+  pipeB.position.set(tankW / 2 + 0.5, 0.6, 0);
+  scene.add(pipeB);
+  const pipeBLabel = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.25, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0xf97316 })
+  );
+  pipeBLabel.position.set(tankW / 2 + 0.5, 1.3, 0);
+  scene.add(pipeBLabel);
+
+  // Drip particles from pipe A
+  const drips = [];
+  const dripGeo = new THREE.SphereGeometry(0.06, 8, 8);
+  const dripMat = new THREE.MeshStandardMaterial({ color: 0x60a5fa });
+  for (let i = 0; i < 6; i++) {
+    const d = new THREE.Mesh(dripGeo, dripMat);
+    d.visible = false;
+    scene.add(d);
+    drips.push({ mesh: d, t: Math.random(), active: false });
+  }
+
+  // Outlet drip particles from pipe B
+  const outDrips = [];
+  const outDripMat = new THREE.MeshStandardMaterial({ color: 0xfb923c });
+  for (let i = 0; i < 4; i++) {
+    const d = new THREE.Mesh(dripGeo, outDripMat);
+    d.visible = false;
+    scene.add(d);
+    outDrips.push({ mesh: d, t: Math.random(), active: false });
+  }
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  // Answer text plane (shown at end)
+  const answerBg = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.5, 0.8),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0 })
+  );
+  answerBg.position.set(0, 2.8, 0);
+  scene.add(answerBg);
+
+  // --- Math ---
+  // 甲管: fills in 6 hours → rate = 1/6 per hour
+  // 乙管: empties in 4 hours → rate = -1/4 per hour
+  // Net rate = 1/6 - 1/4 = (2-3)/12 = -1/12 ... wait that's negative
+  // Actually: 1/6 - 1/4 = 2/12 - 3/12 = -1/12 → net draining!
+  // Hmm, but the problem says "多久注满" implying it does fill.
+  // Let me re-read: 甲管6小时注满, 乙管4小时放空, 两管同时开
+  // Net = 1/6 - 1/4 = -1/12 → it drains, never fills.
+  // But this is a standard problem type. Perhaps the intended interpretation
+  // is that the answer is that it cannot fill, or perhaps the problem expects
+  // the student to realize this. Let me animate it showing the water level
+  // actually going DOWN, and show the conclusion.
+  // 
+  // Actually, re-reading: maybe I should just animate what the math says.
+  // Net rate = 1/6 - 1/4 = -1/12 per hour. The tank drains.
+  // But the problem asks "多久注满" — the answer is "永远注不满" or the problem
+  // might have intended different numbers. Let me just animate the correct math:
+  // water level decreases, and we show the conclusion.
+  //
+  // WAIT — let me reconsider. Standard versions of this problem:
+  // 甲管6小时注满, 乙管8小时放空 → net = 1/6-1/8=1/24, fills in 24h
+  // 甲管4小时注满, 乙管6小时放空 → net = 1/4-1/6=1/12, fills in 12h
+  // The given numbers (6 and 4) give net = -1/12 which drains.
+  // 
+  // I'll animate it faithfully: water starts full, both pipes open,
+  // water level drops, showing that with these rates the tank drains.
+  // The answer: "永远注不满，因为乙管放水比甲管注水快"
+  //
+  // Actually, let me just show it starting empty and the water level
+  // going negative (impossible) — or better: start full, show it draining.
+  // 
+  // Let me animate: tank starts full, both pipes open, water drains
+  // completely. Time to drain = 1 / (1/4 - 1/6) = 1 / (1/12) = 12 hours.
+  // We'll compress 12 hours into the animation duration.
+
+  const totalDuration = 8; // seconds for the animation cycle
+  const drainTime = 12; // hours to drain completely
+  // We'll show: start full, drain over 8 seconds, hold answer, reset.
+
+  let stopped = false;
+  let paused = false;
+  const clock = new THREE.Clock();
+
+  function tick() {
+    if (stopped) return;
+    if (!paused) {
+      let elapsed = clock.getElapsedTime();
+      // Loop: 0-8s animate, 8-9s hold, then reset
+      const cycle = 9;
+      const phase = elapsed % cycle;
+
+      let waterLevel; // 0 to tankH
+      let answerOpacity = 0;
+
+      if (phase < totalDuration) {
+        // Draining: starts full, drains to empty
+        // drain rate: tankH over drainTime hours
+        // We compress drainTime hours into totalDuration seconds
+        const frac = phase / totalDuration; // 0 to 1
+        waterLevel = tankH * (1 - frac);
+        if (waterLevel < 0) waterLevel = 0;
+      } else {
+        // Hold phase — tank is empty, show answer
+        waterLevel = 0;
+        answerOpacity = Math.min((phase - totalDuration) / 0.5, 1);
+      }
+
+      water.scale.y = Math.max(waterLevel / 0.01, 0.001);
+      water.position.y = Math.max(waterLevel / 2, 0.001);
+
+      // Animate drips from pipe A (inlet — still trying to fill)
+      for (const drip of drips) {
+        if (phase < totalDuration) {
+          drip.t += 0.016;
+          if (drip.t > 0.4) drip.t = 0;
+          const px = -tankW / 2 - 0.5;
+          const py = 2.2 - drip.t * 3;
+          drip.mesh.position.set(px, py, 0);
+          drip.mesh.visible = true;
+        } else {
+          drip.mesh.visible = false;
+        }
+      }
+
+      // Animate outlet drips from pipe B
+      for (const drip of outDrips) {
+        if (phase < totalDuration && waterLevel > 0.1) {
+          drip.t += 0.02;
+          if (drip.t > 0.5) drip.t = 0;
+          const px = tankW / 2 + 0.5;
+          const py = 0.6 - drip.t * 2;
+          drip.mesh.position.set(px, py, 0);
+          drip.mesh.visible = true;
+        } else {
+          drip.mesh.visible = false;
+        }
+      }
+
+      // Answer panel
+      answerBg.material.opacity = answerOpacity * 0.85;
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}

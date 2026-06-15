@@ -1,0 +1,187 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  const w = canvas.clientWidth || 800;
+  const h = canvas.clientHeight || 600;
+  renderer.setSize(w, h, false);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
+  camera.position.set(0, 3, 8);
+  camera.lookAt(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  // Ground plane
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(12, 8),
+    new THREE.MeshStandardMaterial({ color: 0xe0f2fe })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  scene.add(ground);
+
+  // Scale: 1 unit = 1 cm
+  // Rectangle: 8 x 6 cm
+  const rectW = 8;
+  const rectH = 6;
+  const cutSide = 2;
+
+  // Main rectangle (blue)
+  const rectGeo = new THREE.BoxGeometry(rectW, 0.15, rectH);
+  const rectMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+  const rectMesh = new THREE.Mesh(rectGeo, rectMat);
+  rectMesh.position.set(0, 0.075, 0);
+  scene.add(rectMesh);
+
+  // Cut-out square (red) — starts at top-right corner
+  // Top-right corner of rectangle: x = rectW/2 = 4, z = -rectH/2 = -3
+  // Square center offset: x = 4 - 1 = 3, z = -3 + 1 = -2
+  const cutGeo = new THREE.BoxGeometry(cutSide, 0.16, cutSide);
+  const cutMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+  const cutMesh = new THREE.Mesh(cutGeo, cutMat);
+  cutMesh.position.set(rectW / 2 - cutSide / 2, 0.08, -rectH / 2 + cutSide / 2);
+  scene.add(cutMesh);
+
+  // Remaining area highlight (green) — shown after cut
+  // The remaining shape is the full rect minus the cut square.
+  // We'll show the remaining area as a green overlay that appears after the red square is removed.
+  // We split the remaining area into two rectangles:
+  // Piece 1: left part — full height, width = rectW - cutSide = 6
+  // Piece 2: bottom-right part — width = cutSide = 2, height = rectH - cutSide = 4
+
+  const piece1Geo = new THREE.BoxGeometry(rectW - cutSide, 0.14, rectH);
+  const piece1Mat = new THREE.MeshStandardMaterial({ color: 0x22c55e, transparent: true, opacity: 0 });
+  const piece1Mesh = new THREE.Mesh(piece1Geo, piece1Mat);
+  piece1Mesh.position.set(-cutSide / 2, 0.07, 0);
+  scene.add(piece1Mesh);
+
+  const piece2Geo = new THREE.BoxGeometry(cutSide, 0.14, rectH - cutSide);
+  const piece2Mat = new THREE.MeshStandardMaterial({ color: 0x22c55e, transparent: true, opacity: 0 });
+  const piece2Mesh = new THREE.Mesh(piece2Geo, piece2Mat);
+  piece2Mesh.position.set(rectW / 2 - cutSide / 2, 0.07, cutSide / 2);
+  scene.add(piece2Mesh);
+
+  // Labels using simple box markers
+  // "8cm" label on top edge
+  const label8 = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 0.05, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x1e293b })
+  );
+  label8.position.set(0, 0.2, -rectH / 2 - 0.4);
+  scene.add(label8);
+
+  // "6cm" label on right edge
+  const label6 = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.05, 1.0),
+    new THREE.MeshStandardMaterial({ color: 0x1e293b })
+  );
+  label6.position.set(rectW / 2 + 0.4, 0.2, 0);
+  scene.add(label6);
+
+  // "2cm" label on cut square
+  const label2 = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.05, 0.6),
+    new THREE.MeshStandardMaterial({ color: 0xef4444 })
+  );
+  label2.position.set(rectW / 2 - cutSide / 2, 0.25, -rectH / 2 + cutSide / 2);
+  scene.add(label2);
+
+  // Answer text indicator (a small sphere that pulses when answer is shown)
+  const answerMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.2, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xf59e0b })
+  );
+  answerMarker.position.set(0, 1.5, 0);
+  answerMarker.visible = false;
+  scene.add(answerMarker);
+
+  // Grid helper
+  scene.add(new THREE.GridHelper(12, 12, 0x94a3b8, 0xe2e8f0));
+
+  let stopped = false;
+  let paused = false;
+  const clock = new THREE.Clock();
+
+  // Animation phases (total ~8s):
+  // Phase 1 (0-2s): Show full rectangle, red square visible at corner
+  // Phase 2 (2-4s): Red square flies away (cut removed)
+  // Phase 3 (4-6s): Green pieces fade in to show remaining area
+  // Phase 4 (6-8s): Answer marker pulses, hold
+
+  const phase1End = 2;
+  const phase2End = 4;
+  const phase3End = 6;
+  const phase4End = 8;
+
+  function tick() {
+    if (stopped) return;
+    requestAnimationFrame(tick);
+    if (paused) return;
+
+    let elapsed = clock.getElapsedTime();
+
+    // Loop after phase4
+    if (elapsed > phase4End) {
+      clock = new THREE.Clock();
+      elapsed = 0;
+      // Reset
+      cutMesh.position.set(rectW / 2 - cutSide / 2, 0.08, -rectH / 2 + cutSide / 2);
+      cutMesh.visible = true;
+      piece1Mat.opacity = 0;
+      piece2Mat.opacity = 0;
+      answerMarker.visible = false;
+      rectMat.color.setHex(0x3b82f6);
+    }
+
+    if (elapsed < phase1End) {
+      // Phase 1: everything static, rectangle + red square visible
+      cutMesh.position.set(rectW / 2 - cutSide / 2, 0.08, -rectH / 2 + cutSide / 2);
+      cutMesh.visible = true;
+      piece1Mat.opacity = 0;
+      piece2Mat.opacity = 0;
+      answerMarker.visible = false;
+    } else if (elapsed < phase2End) {
+      // Phase 2: red square flies up and away
+      const k = (elapsed - phase1End) / (phase2End - phase1End);
+      cutMesh.position.set(
+        rectW / 2 - cutSide / 2,
+        0.08 + k * 3,
+        -rectH / 2 + cutSide / 2 - k * 4
+      );
+      cutMesh.rotation.y = k * Math.PI * 2;
+      piece1Mat.opacity = 0;
+      piece2Mat.opacity = 0;
+      answerMarker.visible = false;
+    } else if (elapsed < phase3End) {
+      // Phase 3: green pieces fade in
+      cutMesh.visible = false;
+      const k = (elapsed - phase2End) / (phase3End - phase2End);
+      piece1Mat.opacity = k * 0.7;
+      piece2Mat.opacity = k * 0.7;
+      answerMarker.visible = false;
+    } else {
+      // Phase 4: show answer
+      cutMesh.visible = false;
+      piece1Mat.opacity = 0.7;
+      piece2Mat.opacity = 0.7;
+      answerMarker.visible = true;
+      const pulse = 0.8 + Math.sin(elapsed * 4) * 0.2;
+      answerMarker.scale.set(pulse, pulse, pulse);
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}

@@ -1,0 +1,161 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  const w = canvas.clientWidth || 400;
+  const h = canvas.clientHeight || 300;
+  renderer.setSize(w, h, false);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
+  camera.position.set(0, 3, 8);
+  camera.lookAt(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  // Ground plane
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(12, 8),
+    new THREE.MeshStandardMaterial({ color: 0xe0f2fe })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  scene.add(ground);
+
+  // Scale: 1 unit = 1 cm
+  // Rectangle: 8 x 6 cm
+  const rectW = 8;
+  const rectH = 6;
+  const sqSide = 2;
+
+  // Main rectangle (centered at origin)
+  const rectGeo = new THREE.PlaneGeometry(rectW, rectH);
+  const rectMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, side: THREE.DoubleSide });
+  const rectMesh = new THREE.Mesh(rectGeo, rectMat);
+  rectMesh.rotation.x = -Math.PI / 2;
+  rectMesh.position.y = 0.01;
+  scene.add(rectMesh);
+
+  // Corner square to be cut (top-right corner)
+  const sqGeo = new THREE.PlaneGeometry(sqSide, sqSide);
+  const sqMat = new THREE.MeshStandardMaterial({ color: 0xef4444, side: THREE.DoubleSide, transparent: true, opacity: 1 });
+  const sqMesh = new THREE.Mesh(sqGeo, sqMat);
+  sqMesh.rotation.x = -Math.PI / 2;
+  sqMesh.position.set(rectW / 2 - sqSide / 2, 0.02, rectH / 2 - sqSide / 2);
+  scene.add(sqMesh);
+
+  // Dashed border lines for the rectangle
+  function makeBorderLine(x1, z1, x2, z2, color) {
+    const pts = [new THREE.Vector3(x1, 0.03, z1), new THREE.Vector3(x2, 0.03, z2)];
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineDashedMaterial({ color, dashSize: 0.15, gapSize: 0.1 });
+    const line = new THREE.Line(geo, mat);
+    line.computeLineDistances();
+    return line;
+  }
+
+  const borderLines = [];
+  const bx1 = -rectW / 2, bx2 = rectW / 2;
+  const bz1 = -rectH / 2, bz2 = rectH / 2;
+  borderLines.push(makeBorderLine(bx1, bz1, bx2, bz1, 0x1e40af));
+  borderLines.push(makeBorderLine(bx2, bz1, bx2, bz2, 0x1e40af));
+  borderLines.push(makeBorderLine(bx2, bz2, bx1, bz2, 0x1e40af));
+  borderLines.push(makeBorderLine(bx1, bz2, bx1, bz1, 0x1e40af));
+  borderLines.forEach(l => scene.add(l));
+
+  // Cut-away animation: the red square flies away
+  const cutStart = 1.5;
+  const cutEnd = 3.5;
+
+  // Text labels using simple plane labels
+  function makeTextPlane(text, fontSize, color) {
+    const cvs = document.createElement('canvas');
+    cvs.width = 512;
+    cvs.height = 128;
+    const ctx = cvs.getContext('2d');
+    ctx.fillStyle = color;
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 256, 64);
+    const tex = new THREE.CanvasTexture(cvs);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide });
+    const geo = new THREE.PlaneGeometry(3, 0.75);
+    return new THREE.Mesh(geo, mat);
+  }
+
+  const areaLabel = makeTextPlane('面积 = 8 × 6 - 2 × 2 = 44 cm²', 42, '#1e3a5f');
+  areaLabel.position.set(0, 2.5, 0);
+  areaLabel.visible = false;
+  scene.add(areaLabel);
+
+  const beforeLabel = makeTextPlane('原面积: 8 × 6 = 48 cm²', 36, '#1e40af');
+  beforeLabel.position.set(-3, 2.2, 0);
+  beforeLabel.visible = false;
+  scene.add(beforeLabel);
+
+  const cutLabel = makeTextPlane('剪去: 2 × 2 = 4 cm²', 36, '#dc2626');
+  cutLabel.position.set(3, 2.2, 0);
+  cutLabel.visible = false;
+  scene.add(cutLabel);
+
+  let stopped = false;
+  let paused = false;
+  const totalDuration = 8;
+  const clock = new THREE.Clock();
+
+  function tick() {
+    if (stopped) return;
+    if (!paused) {
+      const elapsed = clock.getElapsedTime();
+      const t = elapsed % totalDuration;
+
+      // Phase 0: show rectangle (0-1.5s)
+      // Phase 1: cut square flies away (1.5-3.5s)
+      // Phase 2: show answer (3.5-8s)
+
+      if (t < cutStart) {
+        sqMesh.visible = true;
+        sqMesh.position.set(rectW / 2 - sqSide / 2, 0.02, rectH / 2 - sqSide / 2);
+        sqMesh.material.opacity = 1;
+        sqMesh.scale.set(1, 1, 1);
+        beforeLabel.visible = false;
+        cutLabel.visible = false;
+        areaLabel.visible = false;
+      } else if (t < cutEnd) {
+        const k = (t - cutStart) / (cutEnd - cutStart);
+        sqMesh.visible = true;
+        sqMesh.position.set(
+          rectW / 2 - sqSide / 2 + k * 3,
+          0.02 + k * 2,
+          rectH / 2 - sqSide / 2 + k * 2
+        );
+        sqMesh.material.opacity = 1 - k * 0.7;
+        sqMesh.scale.set(1 + k * 0.3, 1 + k * 0.3, 1);
+        sqMesh.rotation.y = k * Math.PI * 2;
+        beforeLabel.visible = true;
+        cutLabel.visible = true;
+        areaLabel.visible = false;
+      } else {
+        sqMesh.visible = false;
+        beforeLabel.visible = true;
+        cutLabel.visible = true;
+        areaLabel.visible = true;
+      }
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}

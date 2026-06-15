@@ -1,0 +1,116 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+  camera.position.set(0, 3, 8);
+
+  // Ground
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(14, 2), new THREE.MeshStandardMaterial({ color: 0xe5e7eb }));
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.5;
+  scene.add(ground);
+
+  // Road
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(10, 0.3), new THREE.MeshStandardMaterial({ color: 0x94a3b8 }));
+  road.rotation.x = -Math.PI / 2;
+  road.position.y = -0.35;
+  scene.add(road);
+
+  // A and B markers
+  const markerA = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.6, 16), new THREE.MeshStandardMaterial({ color: 0x3b82f6 }));
+  markerA.position.set(-5, -0.05, 0);
+  scene.add(markerA);
+
+  const markerB = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.6, 16), new THREE.MeshStandardMaterial({ color: 0xf97316 }));
+  markerB.position.set(5, -0.05, 0);
+  scene.add(markerB);
+
+  // Labels (small boxes as visual indicators)
+  const labelA = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.1), new THREE.MeshStandardMaterial({ color: 0x3b82f6 }));
+  labelA.position.set(-5, 0.6, 0);
+  scene.add(labelA);
+
+  const labelB = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.1), new THREE.MeshStandardMaterial({ color: 0xf97316 }));
+  labelB.position.set(5, 0.6, 0);
+  scene.add(labelB);
+
+  // 小明 (from A to B, speed 4 km/h) - green sphere
+  const xiaoming = new THREE.Mesh(new THREE.SphereGeometry(0.35, 32, 16), new THREE.MeshStandardMaterial({ color: 0x22c55e }));
+  xiaoming.position.set(-5, -0.15, 0);
+  scene.add(xiaoming);
+
+  // 小华 (from B to A, speed 6 km/h) - red sphere
+  const xiaohua = new THREE.Mesh(new THREE.SphereGeometry(0.35, 32, 16), new THREE.MeshStandardMaterial({ color: 0xef4444 }));
+  xiaohua.position.set(5, -0.15, 0);
+  scene.add(xiaohua);
+
+  // Meeting point marker (hidden initially)
+  const meetMarker = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.8, 16), new THREE.MeshStandardMaterial({ color: 0xa855f7 }));
+  meetMarker.position.set(0, -0.05, 0);
+  meetMarker.visible = false;
+  scene.add(meetMarker);
+
+  // Distance scale: 100km = 10 units, so 1 unit = 10km
+  // 小明 speed: 4km/h = 0.4 units/h
+  // 小华 speed: 6km/h = 0.6 units/h
+  // Combined speed: 10km/h = 1 unit/h
+  // Meeting time: 100/10 = 10 hours
+  // Meeting point from A: 4*10 = 40km = 4 units from A (x = -5 + 4 = -1)
+
+  const totalDist = 10; // units
+  const speedMing = 0.4; // units per "hour" in animation
+  const speedHua = 0.6;
+  const meetTime = 10; // hours
+  const meetX = -5 + 4; // x = -1
+
+  // Animation: compress 10 hours into 8 seconds
+  const animDuration = 8; // seconds
+  const holdDuration = 2; // seconds to hold at end
+  const totalDuration = animDuration + holdDuration;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  let stopped = false;
+  let paused = false;
+  const clock = new THREE.Clock();
+
+  function tick() {
+    if (stopped) return;
+    if (!paused) {
+      let t = clock.getElapsedTime() % (totalDuration + 1); // +1 for reset pause
+      if (t > totalDuration) {
+        // Reset phase
+        xiaoming.position.x = -5;
+        xiaohua.position.x = 5;
+        meetMarker.visible = false;
+        labelA.position.set(-5, 0.6, 0);
+        labelB.position.set(5, 0.6, 0);
+      } else if (t <= animDuration) {
+        const progress = t / animDuration;
+        const hoursElapsed = progress * meetTime;
+        xiaoming.position.x = -5 + speedMing * hoursElapsed;
+        xiaohua.position.x = 5 - speedHua * hoursElapsed;
+        meetMarker.visible = false;
+      } else {
+        // Hold at meeting point
+        xiaoming.position.x = meetX;
+        xiaohua.position.x = meetX;
+        meetMarker.visible = true;
+        meetMarker.position.x = meetX;
+      }
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}

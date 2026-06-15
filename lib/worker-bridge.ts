@@ -172,14 +172,23 @@ export async function mountAnimation(
         /* retryable */ true,
       );
     }
-    const returnedCleanup = defaultExport(canvas, view);
-    if (typeof returnedCleanup !== 'function') {
+    const returned = defaultExport(canvas, view);
+
+    // Contract allows EITHER:
+    //   (a) a cleanup function `() => void`, OR
+    //   (b) a `{ stop(): void, setPaused?(p: boolean): void }` controller.
+    // LongCat consistently returns (b); older code returns (a). Accept both.
+    if (typeof returned === 'function') {
+      cleanup = returned;
+    } else if (returned && typeof (returned as { stop?: unknown }).stop === 'function') {
+      const controller = returned as { stop(): void; setPaused?: (p: boolean) => void };
+      cleanup = () => controller.stop();
+    } else {
       throw new MountAnimationError(
-        'LLM 默认导出函数必须返回 cleanup 函数',
+        'LLM 默认导出函数必须返回 cleanup 函数或 { stop, setPaused } 控制器',
         /* retryable */ true,
       );
     }
-    cleanup = returnedCleanup;
   } catch (execError) {
     throw new MountAnimationError(
       execError instanceof Error ? execError.message : '代码执行失败',

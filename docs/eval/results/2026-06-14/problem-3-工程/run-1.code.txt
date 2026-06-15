@@ -1,0 +1,242 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+  camera.position.set(0, 3, 7);
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(12, 6),
+    new THREE.MeshStandardMaterial({ color: 0xd1fae5 })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  scene.add(ground);
+
+  // Tank (open top, wireframe edges + front/back/side faces)
+  const tankW = 2.4, tankH = 2.0, tankD = 1.2;
+  const tankGroup = new THREE.Group();
+  scene.add(tankGroup);
+
+  // Bottom
+  const bottom = new THREE.Mesh(
+    new THREE.BoxGeometry(tankW, 0.08, tankD),
+    new THREE.MeshStandardMaterial({ color: 0x94a3b8 })
+  );
+  bottom.position.y = 0.04;
+  tankGroup.add(bottom);
+
+  // Back wall
+  const backWall = new THREE.Mesh(
+    new THREE.BoxGeometry(tankW, tankH, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0xcbd5e1, transparent: true, opacity: 0.5 })
+  );
+  backWall.position.set(0, tankH / 2, -tankD / 2);
+  tankGroup.add(backWall);
+
+  // Left wall
+  const leftWall = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, tankH, tankD),
+    new THREE.MeshStandardMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.6 })
+  );
+  leftWall.position.set(-tankW / 2, tankH / 2, 0);
+  tankGroup.add(leftWall);
+
+  // Right wall
+  const rightWall = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, tankH, tankD),
+    new THREE.MeshStandardMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.6 })
+  );
+  rightWall.position.set(tankW / 2, tankH / 2, 0);
+  tankGroup.add(rightWall);
+
+  // Water (grows from bottom)
+  const waterMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.75 });
+  const water = new THREE.Mesh(
+    new THREE.BoxGeometry(tankW - 0.16, 0.01, tankD - 0.16),
+    waterMat
+  );
+  water.position.y = 0.08;
+  tankGroup.add(water);
+
+  // Pipe A (inlet, left side, blue) — 甲管
+  const pipeA = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.1, 1.2, 16),
+    new THREE.MeshStandardMaterial({ color: 0x2563eb })
+  );
+  pipeA.position.set(-tankW / 2 - 0.5, tankH + 0.6, 0);
+  scene.add(pipeA);
+
+  // Pipe A horizontal segment
+  const pipeAH = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.1, 0.8, 16),
+    new THREE.MeshStandardMaterial({ color: 0x2563eb })
+  );
+  pipeAH.rotation.z = Math.PI / 2;
+  pipeAH.position.set(-tankW / 2 - 0.1, tankH + 0.6, 0);
+  scene.add(pipeAH);
+
+  // Pipe B (outlet, right side, orange) — 乙管
+  const pipeB = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.1, 0.8, 16),
+    new THREE.MeshStandardMaterial({ color: 0xf97316 })
+  );
+  pipeB.position.set(tankW / 2 + 0.4, 0.4, 0);
+  scene.add(pipeB);
+
+  // Pipe B horizontal segment
+  const pipeBH = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.1, 0.6, 16),
+    new THREE.MeshStandardMaterial({ color: 0xf97316 })
+  );
+  pipeBH.rotation.z = Math.PI / 2;
+  pipeBH.position.set(tankW / 2 + 0.1, 0.4, 0);
+  scene.add(pipeBH);
+
+  // Water drops from pipe A (small spheres)
+  const drops = [];
+  for (let i = 0; i < 5; i++) {
+    const drop = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.8 })
+    );
+    drop.visible = false;
+    scene.add(drop);
+    drops.push({ mesh: drop, t: Math.random(), active: true });
+  }
+
+  // Water drops from pipe B (drain)
+  const drainDrops = [];
+  for (let i = 0; i < 3; i++) {
+    const drop = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0xfb923c, transparent: true, opacity: 0.8 })
+    );
+    drop.visible = false;
+    scene.add(drop);
+    drainDrops.push({ mesh: drop, t: Math.random(), active: true });
+  }
+
+  // Labels as small colored boxes (no text)
+  // Label A — blue marker above pipe A
+  const labelA = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.15, 0.15),
+    new THREE.MeshStandardMaterial({ color: 0x2563eb })
+  );
+  labelA.position.set(-tankW / 2 - 0.5, tankH + 1.4, 0);
+  scene.add(labelA);
+
+  // Label B — orange marker near pipe B
+  const labelB = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.15, 0.15),
+    new THREE.MeshStandardMaterial({ color: 0xf97316 })
+  );
+  labelB.position.set(tankW / 2 + 0.4, 1.0, 0);
+  scene.add(labelB);
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  // Grid
+  scene.add(new THREE.GridHelper(10, 10, 0x94a3b8, 0xe2e8f0));
+
+  // Math: 甲管 1/6 per hour, 乙管 -1/4 per hour, net = 1/6 - 1/4 = -1/12 ... wait
+  // 甲 fills in 6h → rate = 1/6 tank/hour
+  // 乙 empties in 4h → rate = -1/4 tank/hour
+  // Net = 1/6 - 1/4 = (2-3)/12 = -1/12 → net drain, never fills!
+  // But the problem says "多久注满" implying it does fill. Let me re-read.
+  // "甲管6小时注满，乙管4小时放空" — 甲 fills in 6h, 乙 empties in 4h
+  // Net rate = 1/6 - 1/4 = -1/12 → this drains, never fills.
+  // This is actually a trick/traditional problem. The answer is "永远注不满" (never fills).
+  // But let me animate it showing the water level going DOWN to illustrate this.
+  // Actually, let me reconsider — maybe the problem intends 乙管 also fills? No, "放空" means empty.
+  // I'll animate the water level decreasing to show it never fills, and the tank empties.
+
+  // Actually, re-reading: this is a classic problem. The net rate is negative.
+  // The answer is that it will never fill. Let me animate water draining from full to empty.
+  // Start with full tank, both pipes open, water drains.
+
+  // Set initial water to full
+  water.scale.y = 1;
+  water.position.y = tankH / 2 + 0.08;
+
+  let stopped = false;
+  let paused = false;
+  const clock = new THREE.Clock();
+
+  // Total animation: 8 seconds
+  // First second: hold full tank
+  // Then drain over ~5 seconds
+  // Hold empty for 2 seconds
+  // Then refill and loop
+  const holdStart = 1.0;
+  const drainDuration = 5.0;
+  const holdEnd = 2.0;
+  const totalCycle = holdStart + drainDuration + holdEnd;
+
+  function tick() {
+    if (stopped) return;
+    if (!paused) {
+      let t = clock.getElapsedTime() % totalCycle;
+
+      // Water level: starts full (1), drains to 0
+      let level;
+      if (t < holdStart) {
+        level = 1.0;
+      } else if (t < holdStart + drainDuration) {
+        level = 1.0 - (t - holdStart) / drainDuration;
+      } else {
+        level = 0.0;
+      }
+
+      // Update water mesh
+      const waterH = Math.max(level * tankH, 0.01);
+      water.scale.y = waterH / 0.01; // base height is 0.01
+      water.position.y = 0.08 + waterH / 2;
+
+      // Animate drops from pipe A (only when water not full and draining)
+      for (const d of drops) {
+        if (t >= holdStart && t < holdStart + drainDuration) {
+          d.t += 0.016;
+          if (d.t > 1) d.t -= 1;
+          d.mesh.visible = true;
+          const startY = tankH + 0.6;
+          const endY = tankH;
+          d.mesh.position.set(-tankW / 2 - 0.1, startY + d.t * (endY - startY), 0);
+          d.mesh.material.opacity = 1 - d.t * 0.5;
+        } else {
+          d.mesh.visible = false;
+        }
+      }
+
+      // Animate drain drops from pipe B
+      for (const d of drainDrops) {
+        if (t >= holdStart && t < holdStart + drainDuration && level > 0.05) {
+          d.t += 0.02;
+          if (d.t > 1) d.t -= 1;
+          d.mesh.visible = true;
+          const startY = 0.4;
+          const endY = -0.3;
+          d.mesh.position.set(tankW / 2 + 0.1, startY + d.t * (endY - startY), 0);
+          d.mesh.material.opacity = 1 - d.t * 0.5;
+        } else {
+          d.mesh.visible = false;
+        }
+      }
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}

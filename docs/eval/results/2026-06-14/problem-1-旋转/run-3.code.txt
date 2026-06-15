@@ -1,0 +1,267 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  const w = canvas.clientWidth || 800;
+  const h = canvas.clientHeight || 600;
+  renderer.setSize(w, h, false);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
+  camera.position.set(0, 3, 7);
+  camera.lookAt(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 4);
+  scene.add(sun);
+
+  // Ground plane
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(14, 10),
+    new THREE.MeshStandardMaterial({ color: 0xe0f2fe })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  scene.add(ground);
+
+  // Grid
+  scene.add(new THREE.GridHelper(14, 14, 0x94a3b8, 0xcbd5e1));
+
+  // The stick is 12cm long, split 1:2 => 4cm and 8cm
+  // Place O at origin. Short piece extends left 4 units, long piece extends right 8 units.
+  // We'll use 1 unit = 1 cm for clarity.
+
+  const shortLen = 4;
+  const longLen = 8;
+
+  // Short piece (left of O) - blue
+  const shortGeom = new THREE.BoxGeometry(shortLen, 0.15, 0.15);
+  const shortMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+  const shortPiece = new THREE.Mesh(shortGeom, shortMat);
+  shortPiece.geometry.translate(-shortLen / 2, 0, 0); // pivot at right end (O)
+  scene.add(shortPiece);
+
+  // Long piece (right of O) - red
+  const longGeom = new THREE.BoxGeometry(longLen, 0.15, 0.15);
+  const longMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+  const longPiece = new THREE.Mesh(longGeom, longMat);
+  longPiece.geometry.translate(longLen / 2, 0, 0); // pivot at left end (O)
+  scene.add(longPiece);
+
+  // Pivot point O - yellow sphere
+  const pivot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xfacc15 })
+  );
+  scene.add(pivot);
+
+  // Swept area visualization - two semicircles
+  // Short piece sweeps a semicircle of radius 4
+  const shortSweepShape = new THREE.Shape();
+  shortSweepShape.absarc(0, 0, shortLen, Math.PI / 2, -Math.PI / 2, true);
+  shortSweepShape.lineTo(0, 0);
+  const shortSweepGeom = new THREE.ShapeGeometry(shortSweepShape, 32);
+  const shortSweepMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.35, side: THREE.DoubleSide });
+  const shortSweep = new THREE.Mesh(shortSweepGeom, shortSweepMat);
+  shortSweep.rotation.x = -Math.PI / 2;
+  shortSweep.position.y = 0.01;
+  shortSweep.visible = false;
+  scene.add(shortSweep);
+
+  // Long piece sweeps a semicircle of radius 8
+  const longSweepShape = new THREE.Shape();
+  longSweepShape.absarc(0, 0, longLen, -Math.PI / 2, Math.PI / 2, true);
+  longSweepShape.lineTo(0, 0);
+  const longSweepGeom = new THREE.ShapeGeometry(longSweepShape, 32);
+  const longSweepMat = new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.35, side: THREE.DoubleSide });
+  const longSweep = new THREE.Mesh(longSweepGeom, longSweepMat);
+  longSweep.rotation.x = -Math.PI / 2;
+  longSweep.position.y = 0.02;
+  longSweep.visible = false;
+  scene.add(longSweep);
+
+  // Trail arcs (partial, animated)
+  const trailShortMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+  const trailLongMat = new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+
+  // We'll use a custom BufferGeometry for the animated partial semicircle
+  function createPartialSemicircleGeometry(radius, angle) {
+    const segments = 64;
+    const points = [];
+    points.push(0, 0);
+    for (let i = 0; i <= segments; i++) {
+      const a = -Math.PI / 2 + angle * (i / segments);
+      points.push(Math.cos(a) * radius, Math.sin(a) * radius);
+    }
+    const vertices = new Float32Array(points);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(vertices, 2));
+    // Build triangle fan indices
+    const indices = [];
+    for (let i = 1; i <= segments; i++) {
+      indices.push(0, i, i + 1);
+    }
+    geom.setIndex(indices);
+    geom.computeVertexNormals();
+    return geom;
+  }
+
+  const trailShortGeom = createPartialSemicircleGeometry(shortLen, 0);
+  const trailShort = new THREE.Mesh(trailShortGeom, trailShortMat);
+  trailShort.rotation.x = -Math.PI / 2;
+  trailShort.position.y = 0.01;
+  scene.add(trailShort);
+
+  const trailLongGeom = createPartialSemicircleGeometry(longLen, 0);
+  const trailLong = new THREE.Mesh(trailLongGeom, trailLongMat);
+  trailLong.rotation.x = -Math.PI / 2;
+  trailLong.position.y = 0.02;
+  scene.add(trailLong);
+
+  // Answer text plane (shown at end)
+  // We'll create a simple canvas texture for the answer
+  function makeAnswerTexture() {
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(0, 0, 512, 128);
+    ctx.fillStyle = '#facc15';
+    ctx.font = 'bold 28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('S = π×8²÷2 + π×4²÷2 = 40π ≈ 125.66 cm²', 256, 75);
+    const tex = new THREE.CanvasTexture(c);
+    return tex;
+  }
+  const answerTex = makeAnswerTexture();
+  const answerPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(5, 1.25),
+    new THREE.MeshBasicMaterial({ map: answerTex, transparent: true, opacity: 0 })
+  );
+  answerPlane.position.set(0, 2.2, 0);
+  scene.add(answerPlane);
+
+  // Labels for lengths
+  function makeLabelTexture(text, color) {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = color;
+    ctx.font = 'bold 32px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(text, 128, 42);
+    return new THREE.CanvasTexture(c);
+  }
+
+  const labelShort = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.5, 0.4),
+    new THREE.MeshBasicMaterial({ map: makeLabelTexture('4 cm', '#3b82f6'), transparent: true })
+  );
+  labelShort.position.set(-2, 0.5, 0);
+  scene.add(labelShort);
+
+  const labelLong = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.5, 0.4),
+    new THREE.MeshBasicMaterial({ map: makeLabelTexture('8 cm', '#ef4444'), transparent: true })
+  );
+  labelLong.position.set(4, 0.5, 0);
+  scene.add(labelLong);
+
+  // Animation
+  let stopped = false;
+  let paused = false;
+  const totalDuration = 8; // seconds
+  const holdDuration = 1.5; // hold at end
+  const clock = new THREE.Clock();
+
+  function updateTrail(geom, radius, angle) {
+    const segments = 64;
+    const points = [];
+    points.push(0, 0);
+    for (let i = 0; i <= segments; i++) {
+      const a = -Math.PI / 2 + angle * (i / segments);
+      points.push(Math.cos(a) * radius, Math.sin(a) * radius);
+    }
+    const vertices = new Float32Array(points);
+    geom.setAttribute('position', new THREE.BufferAttribute(vertices, 2));
+    const indices = [];
+    for (let i = 1; i <= segments; i++) {
+      indices.push(0, i, i + 1);
+    }
+    geom.setIndex(indices);
+    geom.attributes.position.needsUpdate = true;
+  }
+
+  function tick() {
+    if (stopped) return;
+    if (!paused) {
+      let elapsed = clock.getElapsedTime();
+
+      // Loop: animation + hold, then reset
+      const cycleDuration = totalDuration + holdDuration;
+      const cycleTime = elapsed % cycleDuration;
+
+      let angle; // 0 to PI (180 degrees)
+      let showSwept = false;
+      let showAnswer = false;
+
+      if (cycleTime <= totalDuration) {
+        const t = cycleTime / totalDuration;
+        // Ease in-out
+        angle = t * Math.PI;
+        showSwept = t > 0.8;
+        showAnswer = false;
+      } else {
+        // Hold phase
+        angle = Math.PI;
+        showSwept = true;
+        showAnswer = true;
+      }
+
+      // Rotate the stick group: short piece rotates around O (origin)
+      // The stick starts along x-axis, rotates 180 degrees in the xz-plane (horizontal rotation)
+      // Actually let's rotate in the XY plane for visibility (vertical plane rotation)
+      // But since ground is XZ, let's rotate in XZ plane (horizontal) - more natural for "swept area"
+      // Actually swept area is on the ground, so rotation axis is vertical (Y axis)
+      // The stick rotates around O along the ground plane
+
+      // Short piece: extends from O to the left, rotates 180 degrees
+      shortPiece.rotation.y = angle;
+      longPiece.rotation.y = angle;
+
+      // Update trails
+      updateTrail(trailShortGeom, shortLen, angle);
+      updateTrail(trailLongGeom, longLen, angle);
+
+      // Show full swept areas when animation complete
+      shortSweep.visible = showSwept;
+      longSweep.visible = showSwept;
+
+      // Answer
+      answerPlane.material.opacity = showAnswer ? 1 : 0;
+
+      // Labels follow pieces
+      labelShort.position.x = -shortLen / 2 * Math.cos(angle);
+      labelShort.position.z = shortLen / 2 * Math.sin(angle);
+      labelShort.position.y = 0.5;
+
+      labelLong.position.x = longLen / 2 * Math.cos(angle);
+      labelLong.position.z = -longLen / 2 * Math.sin(angle);
+      labelLong.position.y = 0.5;
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}

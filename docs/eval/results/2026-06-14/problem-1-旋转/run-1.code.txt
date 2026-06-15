@@ -1,0 +1,232 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const w = canvas.clientWidth || 800;
+  const h = canvas.clientHeight || 600;
+  renderer.setSize(w, h, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
+  camera.position.set(0, 3, 8);
+  camera.lookAt(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  // Ground plane
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(16, 10),
+    new THREE.MeshStandardMaterial({ color: 0xe0f2fe })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  scene.add(ground);
+
+  // Grid
+  scene.add(new THREE.GridHelper(16, 16, 0x94a3b8, 0xcbd5e1));
+
+  // The stick is 12cm total. Ratio 1:2 means segments of 4cm and 8cm.
+  // We'll use 1 unit = 1cm for clarity.
+  // Pivot O is at the 4cm mark from the left end.
+  // Left segment: 4cm (from x=-4 to x=0), Right segment: 8cm (from x=0 to x=8)
+
+  const pivot = new THREE.Group();
+  scene.add(pivot);
+
+  // Left segment (4cm) - blue
+  const leftGeom = new THREE.BoxGeometry(4, 0.15, 0.15);
+  const leftMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+  const leftSeg = new THREE.Mesh(leftGeom, leftMat);
+  leftSeg.position.set(-2, 0.075, 0); // center of 4cm segment
+  pivot.add(leftSeg);
+
+  // Right segment (8cm) - red
+  const rightGeom = new THREE.BoxGeometry(8, 0.15, 0.15);
+  const rightMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+  const rightSeg = new THREE.Mesh(rightGeom, rightMat);
+  rightSeg.position.set(4, 0.075, 0); // center of 8cm segment
+  pivot.add(rightSeg);
+
+  // Pivot point marker (O)
+  const pivotDot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xfacc15 })
+  );
+  pivotDot.position.set(0, 0.15, 0);
+  pivot.add(pivotDot);
+
+  // Trail: we'll show the swept area as two semicircles
+  // Left segment sweeps a semicircle of radius 4 (area = π*4²/2 = 8π)
+  // Right segment sweeps a semicircle of radius 8 (area = π*8²/2 = 32π)
+  // Total = 40π
+
+  // Semicircle for left segment (radius 4) - will appear as the stick rotates
+  const semiLeftGeom = new THREE.SectorGeometry(4, 0, Math.PI, 32);
+  const semiLeftMat = new THREE.MeshStandardMaterial({
+    color: 0x3b82f6,
+    transparent: true,
+    opacity: 0.25,
+    side: THREE.DoubleSide
+  });
+  const semiLeft = new THREE.Mesh(semiLeftGeom, semiLeftMat);
+  semiLeft.rotation.x = -Math.PI / 2;
+  semiLeft.position.y = 0.01;
+  semiLeft.visible = false;
+  scene.add(semiLeft);
+
+  // Semicircle for right segment (radius 8)
+  const semiRightGeom = new THREE.SectorGeometry(8, 0, Math.PI, 48);
+  const semiRightMat = new THREE.MeshStandardMaterial({
+    color: 0xef4444,
+    transparent: true,
+    opacity: 0.2,
+    side: THREE.DoubleSide
+  });
+  const semiRight = new THREE.Mesh(semiRightGeom, semiRightMat);
+  semiRight.rotation.x = -Math.PI / 2;
+  semiRight.position.y = 0.01;
+  semiRight.visible = false;
+  scene.add(semiRight);
+
+  // Ghost stick at final position (after 180° rotation)
+  const ghostGroup = new THREE.Group();
+  const ghostLeft = new THREE.Mesh(
+    new THREE.BoxGeometry(4, 0.15, 0.15),
+    new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.2 })
+  );
+  ghostLeft.position.set(2, 0.075, 0);
+  ghostGroup.add(ghostLeft);
+  const ghostRight = new THREE.Mesh(
+    new THREE.BoxGeometry(8, 0.15, 0.15),
+    new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.2 })
+  );
+  ghostRight.position.set(-4, 0.075, 0);
+  ghostGroup.add(ghostRight);
+  ghostGroup.visible = false;
+  scene.add(ghostGroup);
+
+  // Answer text plane (shown at end)
+  // We'll create a simple visual indicator with boxes
+  const answerGroup = new THREE.Group();
+  answerGroup.visible = false;
+  scene.add(answerGroup);
+
+  // Label: "S = 40π ≈ 125.66 cm²" - we'll show this as colored bars
+  // Total area bar
+  const totalBarBg = new THREE.Mesh(
+    new THREE.BoxGeometry(10, 0.3, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0xe2e8f0 })
+  );
+  totalBarBg.position.set(0, -0.8, 0);
+  answerGroup.add(totalBarBg);
+
+  const totalBarFill = new THREE.Mesh(
+    new THREE.BoxGeometry(10, 0.3, 0.06),
+    new THREE.MeshStandardMaterial({ color: 0x8b5cf6 })
+  );
+  totalBarFill.position.set(0, -0.8, 0);
+  answerGroup.add(totalBarFill);
+
+  // Small markers for 8π and 32π
+  const part1 = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 0.25, 0.06),
+    new THREE.MeshStandardMaterial({ color: 0x3b82f6 })
+  );
+  part1.position.set(-4, -1.2, 0);
+  answerGroup.add(part1);
+
+  const part2 = new THREE.Mesh(
+    new THREE.BoxGeometry(8, 0.25, 0.06),
+    new THREE.MeshStandardMaterial({ color: 0xef4444 })
+  );
+  part2.position.set(2, -1.2, 0);
+  answerGroup.add(part2);
+
+  // Animation timing
+  const totalDuration = 8; // seconds
+  const rotateDuration = 5; // seconds for rotation
+  const holdDuration = 2; // hold at end
+  const loopPause = 1; // pause before loop
+
+  let stopped = false;
+  let paused = false;
+  const clock = new THREE.Clock();
+
+  function tick() {
+    if (stopped) return;
+    if (!paused) {
+      let elapsed = clock.getElapsedTime();
+
+      // Loop logic
+      const cycleDuration = rotateDuration + holdDuration + loopPause;
+      let t = elapsed % cycleDuration;
+
+      if (t < rotateDuration) {
+        // Rotating phase
+        const progress = t / rotateDuration;
+        const angle = progress * Math.PI; // 0 to π (180 degrees)
+        pivot.rotation.z = angle;
+
+        // Show semicircular sweep progressively
+        // Left semicircle: grows from 0 to π
+        semiLeft.visible = true;
+        semiRight.visible = true;
+
+        // Update semicircle sectors
+        const leftAngle = angle;
+        const rightAngle = angle;
+
+        // Rebuild semicircle geometries
+        semiLeft.geometry.dispose();
+        semiLeft.geometry = new THREE.SectorGeometry(4, 0, leftAngle, 32);
+        semiLeft.rotation.z = 0;
+
+        semiRight.geometry.dispose();
+        semiRight.geometry = new THREE.SectorGeometry(8, 0, rightAngle, 48);
+        semiRight.rotation.z = 0;
+
+        ghostGroup.visible = false;
+        answerGroup.visible = false;
+      } else if (t < rotateDuration + holdDuration) {
+        // Hold at final position
+        pivot.rotation.z = Math.PI;
+        semiLeft.visible = true;
+        semiRight.visible = true;
+        ghostGroup.visible = true;
+        answerGroup.visible = true;
+
+        // Full semicircles
+        semiLeft.geometry.dispose();
+        semiLeft.geometry = new THREE.SectorGeometry(4, 0, Math.PI, 32);
+        semiRight.geometry.dispose();
+        semiRight.geometry = new THREE.SectorGeometry(8, 0, Math.PI, 48);
+      } else {
+        // Reset for loop
+        pivot.rotation.z = 0;
+        semiLeft.visible = false;
+        semiRight.visible = false;
+        ghostGroup.visible = false;
+        answerGroup.visible = false;
+      }
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  tick();
+
+  return {
+    stop: () => {
+      stopped = true;
+      renderer.dispose();
+    },
+    setPaused: (p) => {
+      paused = p;
+      clock.getDelta();
+    }
+  };
+}

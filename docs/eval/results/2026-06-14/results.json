@@ -1,0 +1,127 @@
+{
+  "date": "2026-06-14",
+  "results": [
+    {
+      "problemId": "1",
+      "run": 1,
+      "ok": true,
+      "latencyMs": 43631,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-1-旋转\\run-1.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-1-旋转\\run-1.png"
+    },
+    {
+      "problemId": "1",
+      "run": 2,
+      "ok": true,
+      "latencyMs": 45002,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-1-旋转\\run-2.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-1-旋转\\run-2.png"
+    },
+    {
+      "problemId": "1",
+      "run": 3,
+      "ok": true,
+      "latencyMs": 55237,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-1-旋转\\run-3.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-1-旋转\\run-3.png"
+    },
+    {
+      "problemId": "2",
+      "run": 1,
+      "ok": true,
+      "latencyMs": 29205,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-2-行程\\run-1.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-2-行程\\run-1.png"
+    },
+    {
+      "problemId": "2",
+      "run": 2,
+      "ok": true,
+      "latencyMs": 28941,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-2-行程\\run-2.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-2-行程\\run-2.png"
+    },
+    {
+      "problemId": "2",
+      "run": 3,
+      "ok": true,
+      "latencyMs": 27869,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-2-行程\\run-3.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-2-行程\\run-3.png"
+    },
+    {
+      "problemId": "3",
+      "run": 1,
+      "ok": true,
+      "latencyMs": 54644,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-3-工程\\run-1.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-3-工程\\run-1.png"
+    },
+    {
+      "problemId": "3",
+      "run": 2,
+      "ok": true,
+      "latencyMs": 116018,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-3-工程\\run-2.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-3-工程\\run-2.png"
+    },
+    {
+      "problemId": "3",
+      "run": 3,
+      "ok": true,
+      "latencyMs": 47037,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-3-工程\\run-3.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-3-工程\\run-3.png"
+    },
+    {
+      "problemId": "4",
+      "run": 1,
+      "ok": true,
+      "latencyMs": 48629,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-4-几何分割\\run-1.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-4-几何分割\\run-1.png"
+    },
+    {
+      "problemId": "4",
+      "run": 2,
+      "ok": true,
+      "latencyMs": 35771,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-4-几何分割\\run-2.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-4-几何分割\\run-2.png"
+    },
+    {
+      "problemId": "4",
+      "run": 3,
+      "ok": true,
+      "latencyMs": 33970,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-4-几何分割\\run-3.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-4-几何分割\\run-3.png"
+    },
+    {
+      "problemId": "5",
+      "run": 1,
+      "ok": true,
+      "latencyMs": 49329,
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-5-分数\\run-1.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-5-分数\\run-1.png"
+    },
+    {
+      "problemId": "5",
+      "run": 2,
+      "ok": false,
+      "latencyMs": 0,
+      "error": "HTTP 500: {\"error\":\"AI 生成的内容无法使用，请修改题目或稍后再试\",\"retryable\":false}",
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-5-分数\\run-2.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-5-分数\\run-2.png"
+    },
+    {
+      "problemId": "5",
+      "run": 3,
+      "ok": false,
+      "latencyMs": 0,
+      "error": "HTTP 500: {\"error\":\"AI 生成的内容无法使用，请修改题目或稍后再试\",\"retryable\":false}",
+      "codeFile": "docs\\eval\\results\\2026-06-14\\problem-5-分数\\run-3.code.txt",
+      "screenshotFile": "docs\\eval\\results\\2026-06-14\\problem-5-分数\\run-3.png"
+    }
+  ]
+}

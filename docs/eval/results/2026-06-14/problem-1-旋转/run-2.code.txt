@@ -1,0 +1,210 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+
+  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+  camera.position.set(0, 3, 8);
+  camera.lookAt(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  // Ground plane
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(16, 10),
+    new THREE.MeshStandardMaterial({ color: 0xe0f2fe })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  scene.add(ground);
+
+  // Grid
+  scene.add(new THREE.GridHelper(16, 16, 0x94a3b8, 0xcbd5e1));
+
+  // The stick is 12cm long, split 1:2 → 4cm and 8cm
+  // O is at the split point. We place O at origin.
+  // Short piece: 4cm (from O to left), Long piece: 8cm (from O to right)
+  // We'll use 1 unit = 1 cm for simplicity
+
+  const shortLen = 4;
+  const longLen = 8;
+
+  // Pivot group (rotates around O = origin)
+  const pivot = new THREE.Group();
+  scene.add(pivot);
+
+  // Short piece (left side, 4cm) - blue
+  const shortGeom = new THREE.BoxGeometry(shortLen, 0.3, 0.3);
+  // Shift so that right end of short piece is at O (origin)
+  const shortMesh = new THREE.Mesh(shortGeom, new THREE.MeshStandardMaterial({ color: 0x3b82f6 }));
+  shortMesh.position.x = -shortLen / 2;
+  pivot.add(shortMesh);
+
+  // Long piece (right side, 8cm) - red
+  const longGeom = new THREE.BoxGeometry(longLen, 0.3, 0.3);
+  const longMesh = new THREE.Mesh(longGeom, new THREE.MeshStandardMaterial({ color: 0xef4444 }));
+  longMesh.position.x = longLen / 2;
+  pivot.add(longMesh);
+
+  // Pivot point O - yellow sphere
+  const pivotDot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.2, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xfacc15 })
+  );
+  scene.add(pivotDot);
+
+  // Trail: we'll show the swept area using a translucent shape
+  // The short piece sweeps a semicircle of radius 4, the long piece sweeps a semicircle of radius 8
+  // We'll build the swept area as a ring sector (semicircle outer - semicircle inner)
+  // Using a custom BufferGeometry for the semicircular ring
+
+  function createSemiRing(innerR, outerR, segments) {
+    const verts = [];
+    const indices = [];
+    // Outer arc (left semicircle, y>=0 when rotation is 0→PI about Z)
+    // Actually rotation is around Z axis, sweeping in XY plane
+    // We want the area swept: semicircle from angle 0 to PI
+    for (let i = 0; i <= segments; i++) {
+      const angle = (Math.PI * i) / segments;
+      verts.push(Math.cos(angle) * outerR, Math.sin(angle) * outerR, 0.02);
+    }
+    for (let i = 0; i <= segments; i++) {
+      const angle = (Math.PI * i) / segments;
+      verts.push(Math.cos(angle) * innerR, Math.sin(angle) * innerR, 0.02);
+    }
+    for (let i = 0; i < segments; i++) {
+      const a = i;
+      const b = i + 1;
+      const c = i + 1 + segments + 1;
+      const d = i + segments + 1;
+      indices.push(a, b, c);
+      indices.push(a, c, d);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  // Swept area: semicircular ring from r=4 to r=8, plus the small semicircle r=0 to r=4
+  // Actually the total swept area = π*8²/2 + π*4²/2 = 32π + 8π = 40π
+  // But visually: the long piece sweeps a big semicircle (r=8), the short piece sweeps a small semicircle (r=4)
+  // The region between them is the ring. The small semicircle is separate.
+  // Let's show both: small semic (r=0 to 4) in blue tint, ring (r=4 to 8) in red tint
+
+  const smallSemiGeo = new THREE.CircleGeometry(4, 48);
+  const smallSemiMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+  const smallSemi = new THREE.Mesh(smallSemiGeo, smallSemiMat);
+  smallSemi.rotation.x = -Math.PI / 2;
+  smallSemi.position.y = 0.01;
+  smallSemi.visible = false;
+  scene.add(smallSemi);
+
+  const ringGeo = createSemiRing(4, 8, 48);
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0xef4444, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+  const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+  ringMesh.visible = false;
+  scene.add(ringMesh);
+
+  // Answer text plane (shown at end)
+  // We'll create a simple canvas texture for the answer
+  function makeTextSprite(text, fontSize, color) {
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#1e293b';
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 256, 64);
+    const tex = new THREE.CanvasTexture(c);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(4, 1, 1);
+    return sprite;
+  }
+
+  const answerSprite = makeTextSprite('扫过面积 = 40π ≈ 125.66 cm²', 36, '#1e293b');
+  answerSprite.position.set(0, -1.5, 0);
+  answerSprite.visible = false;
+  scene.add(answerSprite);
+
+  // Labels
+  const labelSprite = makeTextSprite('O (旋转中心)', 28, '#92400e');
+  labelSprite.position.set(0, -0.6, 0);
+  labelSprite.scale.set(2.5, 0.6, 1);
+  scene.add(labelSprite);
+
+  // Animation
+  let stopped = false;
+  let paused = false;
+  const totalDuration = 8; // seconds
+  const holdDuration = 1.5; // hold at end
+  const clock = new THREE.Clock();
+
+  function tick() {
+    if (stopped) return;
+    requestAnimationFrame(tick);
+    if (paused) {
+      renderer.render(scene, camera);
+      return;
+    }
+
+    let elapsed = clock.getElapsedTime();
+
+    // Loop: animation + hold, then reset
+    const cycleDuration = totalDuration + holdDuration;
+    const cycleTime = elapsed % cycleDuration;
+
+    let angle = 0;
+    let showSwept = false;
+
+    if (cycleTime <= totalDuration) {
+      // Animate rotation from 0 to PI
+      const progress = cycleTime / totalDuration;
+      // Ease in-out
+      const eased = progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      angle = eased * Math.PI;
+
+      // Show swept area progressively
+      if (progress > 0.5) {
+        showSwept = true;
+      }
+    } else {
+      // Hold phase
+      angle = Math.PI;
+      showSwept = true;
+    }
+
+    pivot.rotation.z = angle;
+
+    // Show swept area
+    smallSemi.visible = showSwept;
+    ringMesh.visible = showSwept;
+
+    // Show answer at hold phase
+    answerSprite.visible = cycleTime > totalDuration;
+
+    renderer.render(scene, camera);
+  }
+
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => {
+      paused = p;
+      if (p) clock.getDelta();
+    }
+  };
+}

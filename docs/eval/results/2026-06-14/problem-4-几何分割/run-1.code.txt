@@ -1,0 +1,214 @@
+export default function(canvas) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+
+  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+  camera.position.set(0, 3, 8);
+  camera.lookAt(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  // Ground plane
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(12, 8),
+    new THREE.MeshStandardMaterial({ color: 0xe0f2fe })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  scene.add(ground);
+
+  // Scale: 1 unit = 1 cm
+  // Rectangle: 8cm x 6cm
+  const rectW = 8;
+  const rectH = 6;
+  const sqSide = 2;
+
+  // Main rectangle (blue)
+  const rectGeo = new THREE.BoxGeometry(rectW, 0.15, rectH);
+  const rectMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6 });
+  const rectMesh = new THREE.Mesh(rectGeo, rectMat);
+  rectMesh.position.set(0, 0.075, 0);
+  scene.add(rectMesh);
+
+  // Cut-out square (red) — starts at top-right corner
+  const sqGeo = new THREE.BoxGeometry(sqSide, 0.16, sqSide);
+  const sqMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+  const sqMesh = new THREE.Mesh(sqGeo, sqMat);
+  sqMesh.position.set(rectW / 2 - sqSide / 2, 0.08, rectH / 2 - sqSide / 2);
+  scene.add(sqMesh);
+
+  // Remaining area highlight (green) — the L-shape after cut
+  // We'll show this after the square is removed
+  // Part 1: full width strip at bottom (rectW x (rectH - sqSide))
+  const remainPart1Geo = new THREE.BoxGeometry(rectW, 0.14, rectH - sqSide);
+  const remainPart1Mat = new THREE.MeshStandardMaterial({ color: 0x22c55e, transparent: true, opacity: 0 });
+  const remainPart1 = new THREE.Mesh(remainPart1Geo, remainPart1Mat);
+  remainPart1.position.set(0, 0.07, -(sqSide / 2));
+  scene.add(remainPart1);
+
+  // Part 2: left strip above the cut ((rectW - sqSide) x sqSide)
+  const remainPart2Geo = new THREE.BoxGeometry(rectW - sqSide, 0.14, sqSide);
+  const remainPart2Mat = new THREE.MeshStandardMaterial({ color: 0x22c55e, transparent: true, opacity: 0 });
+  const remainPart2 = new THREE.Mesh(remainPart2Geo, remainPart2Mat);
+  remainPart2.position.set(-sqSide / 2, 0.07, rectH / 2 - sqSide / 2);
+  scene.add(remainPart2);
+
+  // Dashed border lines for the rectangle edges
+  function makeBorderLine(x1, z1, x2, z2) {
+    const pts = [new THREE.Vector3(x1, 0.15, z1), new THREE.Vector3(x2, 0.15, z2)];
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineDashedMaterial({ color: 0x1e3a5f, dashSize: 0.15, gapSize: 0.1 });
+    const line = new THREE.Line(geo, mat);
+    line.computeLineDistances();
+    return line;
+  }
+
+  const halfW = rectW / 2;
+  const halfH = rectH / 2;
+  const borders = [
+    makeBorderLine(-halfW, -halfH, halfW, -halfH),
+    makeBorderLine(halfW, -halfH, halfW, halfH),
+    makeBorderLine(halfW, halfH, -halfW, halfH),
+    makeBorderLine(-halfW, halfH, -halfW, -halfH),
+  ];
+  borders.forEach(b => scene.add(b));
+
+  // Cut-out border lines (dashed red)
+  function makeCutLine(x1, z1, x2, z2) {
+    const pts = [new THREE.Vector3(x1, 0.16, z1), new THREE.Vector3(x2, 0.16, z2)];
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineDashedMaterial({ color: 0xef4444, dashSize: 0.1, gapSize: 0.08 });
+    const line = new THREE.Line(geo, mat);
+    line.computeLineDistances();
+    return line;
+  }
+  const cutLines = [
+    makeCutLine(halfW - sqSide, halfH, halfW, halfH),
+    makeCutLine(halfW, halfH - sqSide, halfW, halfH),
+    makeCutLine(halfW - sqSide, halfH - sqSide, halfW, halfH - sqSide),
+    makeCutLine(halfW - sqSide, halfH, halfW - sqSide, halfH - sqSide),
+  ];
+  cutLines.forEach(l => scene.add(l));
+
+  // Dimension labels using small boxes as tick marks
+  // Length label (8cm) — bottom edge
+  const lenBar = new THREE.Mesh(
+    new THREE.BoxGeometry(rectW, 0.02, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0x1e3a5f })
+  );
+  lenBar.position.set(0, 0.16, -halfH - 0.3);
+  scene.add(lenBar);
+
+  // Width label (6cm) — right edge
+  const widBar = new THREE.Mesh(
+    new THREE.BoxGeometry(0.05, 0.02, rectH),
+    new THREE.MeshStandardMaterial({ color: 0x1e3a5f })
+  );
+  widBar.position.set(halfW + 0.3, 0.16, 0);
+  scene.add(widBar);
+
+  // Small text-like indicators using colored boxes
+  // "8cm" indicator
+  const label8 = new THREE.Mesh(
+    new THREE.BoxGeometry(0.6, 0.02, 0.2),
+    new THREE.MeshStandardMaterial({ color: 0xdc2626 })
+  );
+  label8.position.set(0, 0.16, -halfH - 0.6);
+  scene.add(label8);
+
+  // "6cm" indicator
+  const label6 = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 0.02, 0.6),
+    new THREE.MeshStandardMaterial({ color: 0xdc2626 })
+  );
+  label6.position.set(halfW + 0.6, 0.16, 0);
+  scene.add(label6);
+
+  // "2cm" indicator on the cut square
+  const label2a = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 0.02, sqSide),
+    new THREE.MeshStandardMaterial({ color: 0xfbbf24 })
+  );
+  label2a.position.set(halfW - sqSide / 2, 0.17, halfH + 0.3);
+  scene.add(label2a);
+
+  const label2b = new THREE.Mesh(
+    new THREE.BoxGeometry(sqSide, 0.02, 0.2),
+    new THREE.MeshStandardMaterial({ color: 0xfbbf24 })
+  );
+  label2b.position.set(halfW + 0.3, 0.17, halfH - sqSide / 2);
+  scene.add(label2b);
+
+  // Answer indicator — appears at end
+  const answerGeo = new THREE.BoxGeometry(2.5, 0.02, 0.5);
+  const answerMat = new THREE.MeshStandardMaterial({ color: 0x7c3aed, transparent: true, opacity: 0 });
+  const answerMesh = new THREE.Mesh(answerGeo, answerMat);
+  answerMesh.position.set(0, 0.16, -halfH - 1.2);
+  scene.add(answerMesh);
+
+  // Animation timing
+  const TOTAL = 8; // seconds
+  const PHASE1 = 2;   // show rectangle
+  const PHASE2 = 2;   // highlight cut square
+  const PHASE3 = 2;   // remove square, show remaining
+  const PHASE4 = 2;   // show answer
+
+  let stopped = false;
+  let paused = false;
+  const clock = new THREE.Clock();
+
+  function tick() {
+    if (stopped) return;
+    if (!paused) {
+      const elapsed = clock.getElapsedTime() % TOTAL;
+
+      if (elapsed < PHASE1) {
+        // Phase 1: rectangle visible, square not yet highlighted
+        sqMat.color.setHex(0xef4444);
+        sqMat.opacity = 1;
+        sqMat.transparent = false;
+        remainPart1Mat.opacity = 0;
+        remainPart2Mat.opacity = 0;
+        answerMat.opacity = 0;
+        // Pulse the rectangle
+        const pulse = 1 + Math.sin(elapsed * 3) * 0.02;
+        rectMesh.scale.set(pulse, 1, pulse);
+      } else if (elapsed < PHASE1 + PHASE2) {
+        // Phase 2: highlight the square to be cut (flash)
+        rectMesh.scale.set(1, 1, 1);
+        const flash = Math.sin((elapsed - PHASE1) * 8) > 0;
+        sqMat.color.setHex(flash ? 0xfbbf24 : 0xef4444);
+      } else if (elapsed < PHASE1 + PHASE2 + PHASE3) {
+        // Phase 3: square fades out, remaining area fades in
+        const k = (elapsed - PHASE1 - PHASE2) / PHASE3;
+        sqMat.transparent = true;
+        sqMat.opacity = 1 - k;
+        remainPart1Mat.opacity = k * 0.7;
+        remainPart2Mat.opacity = k * 0.7;
+        answerMat.opacity = 0;
+      } else {
+        // Phase 4: show answer
+        sqMat.opacity = 0;
+        remainPart1Mat.opacity = 0.7;
+        remainPart2Mat.opacity = 0.7;
+        answerMat.opacity = Math.min((elapsed - PHASE1 - PHASE2 - PHASE3) * 2, 1);
+      }
+    }
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  tick();
+
+  return {
+    stop: () => { stopped = true; renderer.dispose(); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}
