@@ -2,16 +2,18 @@
 
 import { useEffect, useRef } from 'react';
 import { mountAnimation } from '@/lib/worker-bridge';
+import type { RenderLine } from '@/lib/types';
 
 type ViewName = 'default' | 'top' | 'side';
 
 interface AnimationCanvasProps {
   code: string;
   view: ViewName;
+  lines?: ReadonlyArray<RenderLine>;
   onError?: (message: string) => void;
 }
 
-export default function AnimationCanvas({ code, view, onError }: AnimationCanvasProps) {
+export default function AnimationCanvas({ code, view, lines, onError }: AnimationCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -20,7 +22,7 @@ export default function AnimationCanvas({ code, view, onError }: AnimationCanvas
     let cleanup: (() => void) | null = null;
     let cancelled = false;
 
-    mountAnimation(el, code, view)
+    mountAnimation(el, code, view, lines ?? [])
       .then((result) => {
         if (cancelled) {
           result.cleanup();
@@ -38,7 +40,7 @@ export default function AnimationCanvas({ code, view, onError }: AnimationCanvas
       cancelled = true;
       if (cleanup) cleanup();
     };
-  }, [code, view, onError]);
+  }, [code, view, lines, onError]);
 
   return <div ref={containerRef} className="absolute inset-0" />;
 }

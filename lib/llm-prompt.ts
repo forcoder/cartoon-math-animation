@@ -63,7 +63,8 @@ const FEW_SHOT_EXAMPLES = `
 //   * horizontal viewpoint by default
 //   * camera auto-fits to the scene bbox so the subject is always centered
 //   * honours the \`view\` argument ('default' | 'top' | 'side')
-export default function(canvas, view) {
+//   * accepts the optional \`lines\` array and renders each entry as a 3D line
+export default function(canvas, view, lines) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
   renderer.setSize(w, h, false);
@@ -119,7 +120,7 @@ export default function(canvas, view) {
 // Example 2 — Bouncing sphere along x-axis with pause control
 //   * horizontal viewpoint + fit-to-scene (same template as Example 1)
 //   * demonstrates host-controlled pause via the { stop, setPaused } form
-export default function(canvas, view) {
+export default function(canvas, view, lines) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
   renderer.setSize(w, h, false);
@@ -179,7 +180,7 @@ export default function(canvas, view) {
 // Example 3 — Two boxes moving toward each other (travel-meeting primitive)
 //   * two objects at the scene extremes; fit-to-scene widens the camera
 //     enough to see BOTH boxes regardless of their separation
-export default function(canvas, view) {
+export default function(canvas, view, lines) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
   renderer.setSize(w, h, false);
@@ -242,6 +243,81 @@ export default function(canvas, view) {
   tick();
   return { stop: () => { stopped = true; renderer.dispose(); }, setPaused: (p) => { paused = p; clock.getDelta(); } };
 }
+
+// Example 4 — Stick partition with auxiliary lines (the new "lines" capability)
+//   * Demonstrates drawing 3D lines from the \`lines\` argument using
+//     THREE.BufferGeometry + THREE.Line / THREE.LineSegments
+//   * Shows the canonical "draw distance marker / divider / guide" patterns
+//   * Defensive: empty \`lines\` is a no-op, NOT an error
+export default function(canvas, view, lines) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
+  renderer.setSize(w, h, false);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xfef3c7);
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 1000);
+
+  // Stick: 12cm long, partitioned 1:2 at point O
+  const stick = new THREE.Mesh(
+    new THREE.BoxGeometry(12, 0.3, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x3b82f6 })
+  );
+  scene.add(stick);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(3, 5, 6);
+  scene.add(sun);
+
+  // *** The lines[] pattern — draw each entry as a LineSegments group ***
+  // Use a single THREE.Group to hold all line objects so cleanup is one dispose() call.
+  const lineGroup = new THREE.Group();
+  lineGroup.name = "aux-lines";
+  if (Array.isArray(lines)) {
+    for (const ln of lines) {
+      if (!ln || !Array.isArray(ln.from) || !Array.isArray(ln.to)) continue;
+      const geom = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(ln.from[0] || 0, ln.from[1] || 0, ln.from[2] || 0),
+        new THREE.Vector3(ln.to[0]   || 0, ln.to[1]   || 0, ln.to[2]   || 0),
+      ]);
+      const mat = new THREE.LineBasicMaterial({ color: (typeof ln.color === "number") ? ln.color : 0x1e293b });
+      lineGroup.add(new THREE.Line(geom, mat));
+    }
+  }
+  scene.add(lineGroup);
+
+  // fit-to-scene
+  scene.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(scene);
+  const center = new THREE.Vector3();
+  bbox.getCenter(center);
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const radius = size.length() / 2 || 1;
+  const vFov = (camera.fov * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (w / h));
+  const minFov = Math.min(vFov, hFov);
+  const distance = (radius / Math.sin(minFov / 2)) * 1.4;
+  const viewDirs = { default: [0, 1, 1], top: [0, 1, 0.001], side: [1, 0, 0] };
+  const v = viewDirs[view] || viewDirs.default;
+  const unitDir = new THREE.Vector3(v[0], v[1], v[2]).normalize();
+  camera.position.copy(center).add(unitDir.multiplyScalar(distance));
+  camera.lookAt(center);
+
+  let stopped = false;
+  let paused = false;
+  const clock = new THREE.Clock();
+  function tick() {
+    if (stopped) return;
+    if (!paused) stick.rotation.z = clock.getElapsedTime() * 0.4;
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+  tick();
+  return {
+    stop: () => { stopped = true; renderer.dispose(); lineGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); },
+    setPaused: (p) => { paused = p; clock.getDelta(); }
+  };
+}
 `;
 
 export function buildSystemPrompt(): string {
@@ -253,10 +329,11 @@ export function buildSystemPrompt(): string {
 - The object MUST have exactly these three keys:
   - \`code\` (string) — a self-contained JavaScript module.
   - \`steps\` (array) — 3-8 steps of verbal explanation, time-ordered.
-  - \`lines\` (array) — may be empty \`[]\` in this version; reserved for P1.
-- The \`code\` value MUST start with \`export default function(canvas, view) {\` and end with \`}\`.
-- \`canvas\` is the HTMLCanvasElement the host mounted. \`view\` is one of three strings: \`'default' | 'top' | 'side'\` (see the View parameter section below). The user can switch between them at runtime — the host re-invokes your function with the new view name, so the SAME code MUST handle all three.
-- Inside the function: create your own THREE.Scene, THREE.PerspectiveCamera, THREE.WebGLRenderer bound to \`canvas\`, and an animation loop using requestAnimationFrame.
+  - \`lines\` (array) — 0-N auxiliary 3D lines drawn on top of the animation.
+- The \`code\` value MUST start with \`export default function(canvas, view, lines) {\` and end with \`}\`.
+- \`canvas\` is the HTMLCanvasElement the host mounted. \`view\` is one of three strings: \`'default' | 'top' | 'side'\` (see the View parameter section below). \`lines\` is an array of \`{ from: [x,y,z], to: [x,y,z], color?: number, label?: string }\` entries (see the "Lines guidance" section below). All three are passed by the host — accept them in the signature even if you draw no lines this round (an empty array is a normal case).
+- The user can switch \`view\` at runtime — the host re-invokes your function with the new view name, so the SAME code MUST handle all three.
+- Inside the function: create your own THREE.Scene, THREE.PerspectiveCamera, THREE.WebGLRenderer bound to \`canvas\`, and an animation loop using requestAnimationFrame. If \`lines\` is non-empty, iterate it and add the corresponding \`THREE.Line\` / \`THREE.LineSegments\` to the scene (the few-shot examples show the exact pattern).
 - The function MUST return either:
   - \`() => { ... }\` — a cleanup function that stops the loop and disposes the renderer, OR
   - \`{ stop: () => void, setPaused: (paused: boolean) => void }\` — when you need host-controlled pause (preferred for any animation with time progression the user might want to step through).
@@ -274,6 +351,22 @@ export function buildSystemPrompt(): string {
 - All \`text\` MUST be in Chinese (the user is a Chinese student). Keep each step to ≤30 Chinese characters — short and punchy.
 - \`t\` values must be monotonically non-decreasing and within the animation duration. Aim for one step every 1-3 seconds of animation.
 - If the animation has no obvious phases (e.g. a single static rotation), still produce 3 steps: "读题" → "开始旋转" → "结论".
+
+# Lines guidance (3D auxiliary lines drawn on top of the scene)
+
+- The \`lines\` array carries 0-N entries; each entry is:
+  \`{ "from": [x, y, z], "to": [x, y, z], "color": <integer>, "label": "<optional Chinese text>" }\`
+  \`color\` is a Three.js hex int (e.g. \`0xef4444\` for red). \`label\` is reserved for P2 Sprite text and is not rendered yet — but emit it when natural.
+- Emit lines for things the user would otherwise have to imagine:
+  - **Distance markers** (行程/几何): a line spanning two points + a label like \`"100km"\`
+  - **Dividers / split marks** (切分/分数): a thin line at the cut point, perpendicular to the parent
+  - **Trajectories** (运动): a dashed-look line showing the path an object will take (use a separate line entry per dash)
+  - **Angle bisectors / height markers** (几何): a line from a vertex to the opposite side
+  - **Grid tick marks** (刻度): short lines every unit along an axis
+- Emit 0 lines if no obvious candidates exist (e.g. a single rotating stick with no companion objects). An empty \`[]\` is correct.
+- In your \`code\`, iterate \`lines\` and add a \`THREE.Line\` per entry to the scene (see Example 4). Default color \`0x1e293b\` (slate-800) if \`color\` is missing.
+- Colors cheat sheet: distance/path \`0x64748b\` (slate-500), divider \`0xef4444\` (red), highlight \`0x22c55e\` (green), answer \`0x3b82f6\` (blue).
+- \`THREE.LineBasicMaterial\` does NOT support \`linewidth > 1\` on most browsers — keep the contract honest and never rely on thick lines.
 
 # Sandbox constraints (hard rules — code violating these will be rejected)
 

@@ -35,13 +35,23 @@ describe("buildSystemPrompt", () => {
   it("requires the function signature to accept a `view` argument", () => {
     // Regression guard: original prompt had `function(canvas)`, which
     // made the top/side view buttons no-op (the user's reported bug).
-    expect(prompt).toMatch(/function\s*\(\s*canvas\s*,\s*view\s*\)/);
+    expect(prompt).toMatch(/function\s*\(\s*canvas\s*,\s*view\s*(,\s*lines)?\s*\)/);
   });
 
   it("documents the three legal view values: default | top | side", () => {
     expect(prompt).toMatch(/'default'/);
     expect(prompt).toMatch(/'top'/);
     expect(prompt).toMatch(/'side'/);
+  });
+
+  it("documents the `lines` argument (P1 draw-on-top capability)", () => {
+    expect(prompt).toMatch(/function\s*\(\s*canvas\s*,\s*view\s*,\s*lines\s*\)/);
+    expect(prompt).toMatch(/Lines guidance/);
+    expect(prompt).toMatch(/THREE\.Line/);
+  });
+
+  it("includes Example 4 demonstrating the lines[] pattern", () => {
+    expect(prompt).toMatch(/Example\s+4/);
   });
 
   it("requires fit-to-scene camera placement (so subjects are never cropped)", () => {
@@ -77,12 +87,13 @@ describe("buildSystemPrompt", () => {
   });
 
   it("few-shot examples all accept the `view` argument", () => {
-    // Count: each example should have `function(canvas, view)`.
-    const matches = prompt.match(/function\s*\(\s*canvas\s*,\s*view\s*\)/g);
+    // Count: each example should have `function(canvas, view[, lines])`.
+    // P1 added an optional `lines` parameter; the regex accepts either form.
+    const matches = prompt.match(/function\s*\(\s*canvas\s*,\s*view\s*(?:,\s*lines)?\s*\)/g);
     expect(matches).not.toBeNull();
-    // We have 3 few-shot examples. Allow ≥ 3 to be tolerant of extra
+    // We have 4 few-shot examples. Allow ≥ 4 to be tolerant of extra
     // references in the prose.
-    expect(matches!.length).toBeGreaterThanOrEqual(3);
+    expect(matches!.length).toBeGreaterThanOrEqual(4);
   });
 
   it("mentions Chinese math problems", () => {

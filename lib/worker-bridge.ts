@@ -32,6 +32,7 @@
  */
 
 import type { SandboxMessage, SandboxResponse } from './worker-types';
+import type { RenderLine } from './types';
 
 export type ViewName = 'default' | 'top' | 'side';
 
@@ -57,7 +58,7 @@ export interface BridgeResult {
 const BRIDGE_TIMEOUT_MS = 12_000;
 
 interface UserSetupFunction {
-  (canvas: HTMLCanvasElement, view: ViewName): () => void;
+  (canvas: HTMLCanvasElement, view: ViewName, lines?: ReadonlyArray<RenderLine>): () => void;
 }
 
 /**
@@ -68,11 +69,18 @@ interface UserSetupFunction {
  * Returns a `MountResult` whose `cleanup` is whatever the LLM code
  * returned from its default export (typically: stop the rAF loop and
  * dispose the renderer).
+ *
+ * `lines` is an optional array of auxiliary 3D lines emitted by the
+ * LLM in the JSON envelope. The bridge passes them to the LLM
+ * function as its third argument; the function is responsible for
+ * materialising them inside the scene (the host does NOT auto-render
+ * them — that's the contract the few-shot examples teach).
  */
 export async function mountAnimation(
   element: HTMLElement,
   code: string,
   view: ViewName,
+  lines: ReadonlyArray<RenderLine> = [],
 ): Promise<MountResult> {
   // 1. Validate the code in a sandboxed worker. Catches cheap errors
   //    before we ever allocate a WebGL context.
@@ -172,7 +180,7 @@ export async function mountAnimation(
         /* retryable */ true,
       );
     }
-    const returned = defaultExport(canvas, view);
+    const returned = defaultExport(canvas, view, lines);
 
     // Contract allows EITHER:
     //   (a) a cleanup function `() => void`, OR

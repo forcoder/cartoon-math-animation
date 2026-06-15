@@ -18,14 +18,17 @@ import {
   MeshBasicMaterial,
   PerspectiveCamera,
   Vector3,
+  LineSegments,
 } from "three";
 import {
   VIEW_PRESETS,
   FIT_PADDING,
   fitCameraToScene,
   computeSceneBoundingBox,
+  addLinesToScene,
   type ViewName,
 } from "@/lib/three-helpers";
+import type { RenderLine } from "@/lib/types";
 
 function makeBoxAt(x: number, y: number, z: number, size = 1): Mesh {
   const geom = new BoxGeometry(size, size, size);
@@ -190,5 +193,67 @@ describe("ViewName type", () => {
     // Compile-time check via a const-asserted tuple cast.
     const allowed: ViewName[] = ["default", "top", "side"];
     expect(new Set(allowed)).toEqual(new Set(Object.keys(VIEW_PRESETS)));
+  });
+});
+
+describe("addLinesToScene", () => {
+  it("returns an invisible placeholder when the input is empty (uniform cleanup)", () => {
+    const scene = new Scene();
+    const obj = addLinesToScene(scene, []);
+    expect(obj).toBeInstanceOf(LineSegments);
+    expect(obj.visible).toBe(false);
+    expect(scene.children).toContain(obj);
+  });
+
+  it("adds a single LineSegments containing all the input lines", () => {
+    const scene = new Scene();
+    const lines: RenderLine[] = [
+      { from: [0, 0, 0], to: [1, 0, 0] },
+      { from: [1, 0, 0], to: [1, 1, 0] },
+      { from: [1, 1, 0], to: [0, 0, 0] },
+    ];
+    const obj = addLinesToScene(scene, lines);
+    expect(obj).toBeInstanceOf(LineSegments);
+    // 3 lines * 2 vertices * 3 floats = 18 positions
+    const positions = obj.geometry.getAttribute("position");
+    expect(positions.count).toBe(6); // 3 segments * 2 endpoints each
+  });
+
+  it("preserves user-supplied colors (verified via vertexColors attribute)", () => {
+    const scene = new Scene();
+    const lines: RenderLine[] = [
+      { from: [0, 0, 0], to: [1, 0, 0], color: 0xef4444 },
+    ];
+    const obj = addLinesToScene(scene, lines);
+    const colors = obj.geometry.getAttribute("color");
+    // Three.js v0.150+ stores Color values in LINEAR space. The hex
+    // 0xef4444 (sRGB 0.937) becomes linear ~0.86, which multiplied by
+    // 255 is ~220. The exact match for the sRGB 239 lives in the
+    // framebuffer at render time (after the renderer's sRGB encode).
+    const r = (colors.getX(0) * 255) | 0;
+    const g = (colors.getY(0) * 255) | 0;
+    const b = (colors.getZ(0) * 255) | 0;
+    expect(r).toBe(220);
+    expect(g).toBe(14);
+    expect(b).toBe(14);
+  });
+
+  it("falls back to slate-800 (0x1e293b) when color is missing", () => {
+    const scene = new Scene();
+    const lines: RenderLine[] = [{ from: [0, 0, 0], to: [1, 0, 0] }];
+    const obj = addLinesToScene(scene, lines);
+    const colors = obj.geometry.getAttribute("color");
+    // 0x1e293b (slate-800) is a very dark color; after sRGB→linear
+    // conversion the R channel becomes ~0.013, i.e. ~3 out of 255.
+    const r = (colors.getX(0) * 255) | 0;
+    expect(r).toBe(3);
+  });
+
+  it("names the object so it can be found for cleanup", () => {
+    const scene = new Scene();
+    const obj = addLinesToScene(scene, [
+      { from: [0, 0, 0], to: [1, 0, 0] },
+    ]);
+    expect(obj.name).toBe("cartoon-aux-lines");
   });
 });

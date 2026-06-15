@@ -24,7 +24,13 @@ import {
   DirectionalLight,
   Box3,
   Vector3,
+  BufferGeometry,
+  Float32BufferAttribute,
+  Line,
+  LineBasicMaterial,
+  LineSegments,
 } from 'three';
+import type { RenderLine } from './types';
 
 export type ViewName = 'default' | 'top' | 'side';
 
@@ -257,4 +263,72 @@ export function fitCameraToScene(
   camera.position.copy(center).add(dir.multiplyScalar(distance));
   camera.lookAt(center);
   camera.updateProjectionMatrix();
+}
+
+/**
+ * Render a batch of `RenderLine` specs as Three.js LineSegments added
+ * to the given scene. Used by mountAnimation in P1 to overlay 3D
+ * auxiliary lines (distance markers, angle bisectors, tick marks,
+ * dashed dividers) on top of whatever the LLM-generated code already
+ * drew.
+ *
+ * Each `RenderLine` becomes ONE segment (from `from` to `to`). To draw
+ * a multi-segment polyline, emit multiple entries — the caller controls
+ * the geometry, we just materialise.
+ *
+ * Default color is 0x1e293b (slate-800) so lines stay visible on the
+ * 0xf8fafc background. WebGL clamps `linewidth` to 1 on most platforms
+ * (this is a long-standing browser limitation, not our bug) — we keep
+ * the contract honest about it.
+ *
+ * Returns the created LineSegments so the caller can dispose it on
+ * unmount. Empty input returns an invisible placeholder so the caller
+ * can call `dispose()` uniformly.
+ */
+export function addLinesToScene(
+  scene: Scene,
+  lines: ReadonlyArray<RenderLine>,
+): LineSegments {
+  if (!lines || lines.length === 0) {
+    // Empty placeholder so the caller's cleanup path is uniform.
+    const geom = new BufferGeometry();
+    const mat = new LineBasicMaterial({ color: 0x1e293b });
+    const obj = new LineSegments(geom, mat);
+    obj.visible = false;
+    scene.add(obj);
+    return obj;
+  }
+
+  const positions = new Float32Array(lines.length * 6);
+  const colors = new Float32Array(lines.length * 6);
+
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    const [fx, fy, fz] = ln.from;
+    const [tx, ty, tz] = ln.to;
+    positions.set([fx, fy, fz, tx, ty, tz], i * 6);
+
+    // Three.js v0.150+ already converts a hex int from sRGB to linear
+    // when constructing `new Color(0xef4444)` (the value the user
+    // provided is the conventional sRGB hex; the renderer's sRGB output
+    // pipeline then re-encodes for display, so we end up with the
+    // intended color). Calling `convertSRGBToLinear()` on top would
+    // double-convert and make the lines visibly darker.
+    const c = new Color(typeof ln.color === "number" ? ln.color : 0x1e293b);
+    colors.set([c.r, c.g, c.b, c.r, c.g, c.b], i * 6);
+  }
+
+  const geom = new BufferGeometry();
+  geom.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geom.setAttribute("color", new Float32BufferAttribute(colors, 3));
+
+  const mat = new LineBasicMaterial({
+    vertexColors: true,
+    linewidth: 1,
+  });
+
+  const obj = new LineSegments(geom, mat);
+  obj.name = "cartoon-aux-lines";
+  scene.add(obj);
+  return obj;
 }
