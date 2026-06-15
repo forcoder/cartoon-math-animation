@@ -34,7 +34,8 @@
 import type { SandboxMessage, SandboxResponse } from './worker-types';
 import type { RenderLine } from './types';
 import { makeTextSprite, placeLabelForLine, disposeTextSprite } from './three-text';
-import type { Sprite } from 'three';
+import { tweenCameraTo, highlightMesh } from './three-camera';
+import type { Sprite, Scene, PerspectiveCamera } from 'three';
 
 export type ViewName = 'default' | 'top' | 'side';
 
@@ -83,6 +84,7 @@ export async function mountAnimation(
   code: string,
   view: ViewName,
   lines: ReadonlyArray<RenderLine> = [],
+  steps: ReadonlyArray<import('./types').RenderStep> = [],
 ): Promise<MountResult> {
   // 1. Validate the code in a sandboxed worker. Catches cheap errors
   //    before we ever allocate a WebGL context.
@@ -189,6 +191,12 @@ export async function mountAnimation(
   const originalLabel: unknown = (globalThis as Record<string, unknown>).__cartoonLabel__;
   (globalThis as Record<string, unknown>).__cartoonLabel__ = labelFactory;
 
+  // P3b: pin the host's step data so the LLM function can read it
+  // back from globalThis (some prompts encourage reading host hints
+  // before adding the focus/camera fields). We also pin a steps
+  // accessor the LLM can call instead of touching globalThis directly.
+  (globalThis as Record<string, unknown>).__cartoonSteps__ = steps;
+
   try {
     const scriptBody = stripExportDefault(code);
     // The body has already been transformed so `export default fn`
@@ -241,16 +249,75 @@ export async function mountAnimation(
     }
   }
 
+  // P3b: read scene + camera back from the globalThis the LLM was
+  // asked to populate. The few-shot Example 4 sets both; older code
+  // that doesn't will leave them undefined and we skip the follow
+  // rAF entirely. This keeps P0/P1 code working untouched.
+  const hostScene = (globalThis as Record<string, unknown>).__cartoonScene__ as
+    | Scene
+    | undefined;
+  const hostCamera = (globalThis as Record<string, unknown>).__cartoonCamera__ as
+    | PerspectiveCamera
+    | undefined;
+  // Always clear the globalThis pins so they don't leak across mounts.
+  delete (globalThis as Record<string, unknown>).__cartoonScene__;
+  delete (globalThis as Record<string, unknown>).__cartoonCamera__;
+  delete (globalThis as Record<string, unknown>).__cartoonSteps__;
+
   // Wrap the LLM's cleanup so we also dispose the host-owned Sprite
-  // textures + materials. LLM cleanup runs first (stops the rAF loop,
-  // disposes the renderer + meshes it created), then we free our
-  // CanvasTextures. Order matters: if we disposed first, the LLM
-  // function could still try to render one more frame.
+  // textures + materials AND cancel the follow rAF. LLM cleanup runs
+  // first (stops the rAF loop, disposes the renderer + meshes it
+  // created), then we free our CanvasTextures and stop the host loop.
+  // Order matters: if we disposed first, the LLM function could
+  // still try to render one more frame.
+  let followRafId: number | null = null;
+  if (hostScene && hostCamera && steps.length > 0) {
+    const startedAt = performance.now();
+    let lastActiveIdx = -1;
+    let lastFocusName: string | undefined;
+    const followTick = (now: number) => {
+      const elapsed = (now - startedAt) / 1000;
+      // Find the active step: last one whose t <= elapsed.
+      let activeIdx = -1;
+      for (let i = 0; i < steps.length; i++) {
+        if (steps[i].t <= elapsed) activeIdx = i;
+        else break;
+      }
+      if (activeIdx !== lastActiveIdx) {
+        // Step changed — swap mesh highlight and tween camera.
+        if (activeIdx >= 0) {
+          const step = steps[activeIdx];
+          if (step.focus?.mesh !== undefined) {
+            highlightMesh(hostScene, step.focus.mesh, lastFocusName);
+            lastFocusName = step.focus.mesh;
+          }
+          if (step.camera) {
+            tweenCameraTo(hostCamera, step.camera);
+          }
+        }
+        lastActiveIdx = activeIdx;
+      } else if (activeIdx >= 0) {
+        // Same step but keep tweening toward its target (handles the
+        // t==0 case where the camera hasn't reached its first goal yet).
+        const step = steps[activeIdx];
+        if (step.camera) {
+          tweenCameraTo(hostCamera, step.camera);
+        }
+      }
+      followRafId = requestAnimationFrame(followTick);
+    };
+    followRafId = requestAnimationFrame(followTick);
+  }
+
   const innerCleanup = cleanup;
   cleanup = () => {
     try {
       innerCleanup();
     } finally {
+      if (followRafId !== null) {
+        cancelAnimationFrame(followRafId);
+        followRafId = null;
+      }
       for (const s of labelSprites) {
         disposeTextSprite(THREE, s);
       }

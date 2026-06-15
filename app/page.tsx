@@ -169,7 +169,7 @@ export default function HomePage() {
         {status === 'idle' && <div className="flex h-full items-center justify-center text-slate-400">等待题目</div>}
         {status === 'loading' && <LoadingState progress={progress} />}
         {status === 'error' && <ErrorState error={errorMsg} onRetry={handleRetry} />}
-        {showCanvas && <AnimationCanvas code={code} view={view} lines={lines} onError={handleMountError} />}
+        {showCanvas && <AnimationCanvas code={code} view={view} lines={lines} steps={steps} onError={handleMountError} />}
       </section>
       {showCanvas && (
         <StepsPanel steps={steps} currentTime={currentTime} />

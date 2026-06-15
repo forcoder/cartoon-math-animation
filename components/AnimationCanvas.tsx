@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { mountAnimation } from '@/lib/worker-bridge';
-import type { RenderLine } from '@/lib/types';
+import type { RenderLine, RenderStep } from '@/lib/types';
 
 type ViewName = 'default' | 'top' | 'side';
 
@@ -10,10 +10,19 @@ interface AnimationCanvasProps {
   code: string;
   view: ViewName;
   lines?: ReadonlyArray<RenderLine>;
+  /**
+   * Optional step timeline. When provided, mountAnimation starts a
+   * follow rAF that tweens the camera and swaps mesh emissive
+   * highlights in sync with the elapsed time. The LLM function is
+   * responsible for setting `mesh.name` on the geometries it wants
+   * to be highlightable, and for pinning `globalThis.__cartoonScene__`
+   * and `globalThis.__cartoonCamera__` so the host can read them.
+   */
+  steps?: ReadonlyArray<RenderStep>;
   onError?: (message: string) => void;
 }
 
-export default function AnimationCanvas({ code, view, lines, onError }: AnimationCanvasProps) {
+export default function AnimationCanvas({ code, view, lines, steps, onError }: AnimationCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -22,7 +31,7 @@ export default function AnimationCanvas({ code, view, lines, onError }: Animatio
     let cleanup: (() => void) | null = null;
     let cancelled = false;
 
-    mountAnimation(el, code, view, lines ?? [])
+    mountAnimation(el, code, view, lines ?? [], steps ?? [])
       .then((result) => {
         if (cancelled) {
           result.cleanup();
@@ -40,7 +49,7 @@ export default function AnimationCanvas({ code, view, lines, onError }: Animatio
       cancelled = true;
       if (cleanup) cleanup();
     };
-  }, [code, view, lines, onError]);
+  }, [code, view, lines, steps, onError]);
 
   return <div ref={containerRef} className="absolute inset-0" />;
 }

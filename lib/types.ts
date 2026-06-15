@@ -16,6 +16,15 @@ export interface RenderRequest {
  * A single step in the problem's verbal explanation timeline.
  * `t` is the offset in seconds from the start of the animation when this
  * step's text should be highlighted in the side panel.
+ *
+ * P3b added two optional per-step hooks for camera follow + mesh focus:
+ *   - `focus.mesh` — name of the mesh that this step is "about" (the
+ *     LLM must set `mesh.name` on the corresponding geometry). The
+ *     host will swap an emissive highlight onto it when the playhead
+ *     crosses this step's `t`.
+ *   - `camera` — world position the camera should tween to for this
+ *     step. Omit to keep the camera where it was (useful for steps
+ *     that just explain a static scene).
  */
 export interface RenderStep {
   /** Display order, 1-indexed for human-friendly keys. */
@@ -24,6 +33,10 @@ export interface RenderStep {
   t: number;
   /** Chinese explanation of what this part of the animation is showing. */
   text: string;
+  /** Optional: which mesh this step is about. */
+  focus?: { mesh?: string };
+  /** Optional: world-space camera position for this step. */
+  camera?: [number, number, number];
 }
 
 /**

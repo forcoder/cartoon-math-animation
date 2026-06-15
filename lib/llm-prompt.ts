@@ -244,13 +244,17 @@ export default function(canvas, view, lines) {
   return { stop: () => { stopped = true; renderer.dispose(); }, setPaused: (p) => { paused = p; clock.getDelta(); } };
 }
 
-// Example 4 — Stick partition with auxiliary lines AND text labels (P2)
+// Example 4 — Stick partition with auxiliary lines, text labels, AND step follow (P3b)
 //   * Demonstrates drawing 3D lines from the \`lines\` argument using
 //     THREE.BufferGeometry + THREE.Line
 //   * Demonstrates calling \`__cartoonLabel__(text, position, color)\` to
 //     render a Chinese (or any Unicode) text label as a Three.js Sprite.
-//     The Sprite is always camera-facing, so the label stays readable.
-//   * Defensive: empty \`lines\` is a no-op, NOT an error
+//   * Demonstrates P3b step follow: each mesh has a \`name\` so the host
+//     can highlight it via emissive; the function pins \`scene\` and
+//     \`camera\` onto \`globalThis\` so the host-side rAF can drive
+//     a follow tween based on the active step's \`focus.mesh\` /
+//     \`camera\` fields. The function reads \`globalThis.__cartoonSteps__\`
+//     to know which steps apply to this scene.
 export default function(canvas, view, lines) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
@@ -259,21 +263,39 @@ export default function(canvas, view, lines) {
   scene.background = new THREE.Color(0xfef3c7);
   const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 1000);
 
-  // Stick: 12cm long, partitioned 1:2 at point O
-  const stick = new THREE.Mesh(
-    new THREE.BoxGeometry(12, 0.3, 0.3),
+  // *** Mesh naming for P3b highlight ***
+  // Each Mesh MUST have a \`.name\` matching the \`focus.mesh\` string
+  // in the corresponding step. The host uses scene.getObjectByName().
+  const stickA = new THREE.Mesh(
+    new THREE.BoxGeometry(4, 0.3, 0.3),
     new THREE.MeshStandardMaterial({ color: 0x3b82f6 })
   );
-  scene.add(stick);
+  stickA.name = "stickA";   // ← referenced by step[1].focus.mesh
+  stickA.position.set(-4, 0, 0);
+  scene.add(stickA);
+
+  const stickB = new THREE.Mesh(
+    new THREE.BoxGeometry(8, 0.3, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0xef4444 })
+  );
+  stickB.name = "stickB";   // ← referenced by step[2].focus.mesh
+  stickB.position.set(4, 0, 0);
+  scene.add(stickB);
+
+  const divider = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.7, 0.1),
+    new THREE.MeshStandardMaterial({ color: 0x22c55e })
+  );
+  divider.name = "divider";  // ← referenced by step[3].focus.mesh
+  divider.position.set(0, 0, 0);
+  scene.add(divider);
+
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(3, 5, 6);
   scene.add(sun);
 
-  // *** The lines[] pattern — draw each entry as a LineSegments group ***
-  // AND label each one via __cartoonLabel__() so the user sees what
-  // each line MEANS (e.g. "4cm", "分割点"). Labels float above the
-  // line midpoint; the host auto-disposes their textures on unmount.
+  // *** Lines + labels (P1 + P2) ***
   const lineGroup = new THREE.Group();
   lineGroup.name = "aux-lines";
   if (Array.isArray(lines)) {
@@ -283,22 +305,17 @@ export default function(canvas, view, lines) {
       const t = new THREE.Vector3(ln.to[0]   || 0, ln.to[1]   || 0, ln.to[2]   || 0);
       const geom = new THREE.BufferGeometry().setFromPoints([f, t]);
       const color = (typeof ln.color === "number") ? ln.color : 0x1e293b;
-      const mat = new THREE.LineBasicMaterial({ color });
-      lineGroup.add(new THREE.Line(geom, mat));
-      // Label (if any) — sit on top of the line midpoint
+      lineGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([f, t]), new THREE.LineBasicMaterial({ color })));
       if (typeof ln.label === "string" && ln.label.length > 0 && typeof __cartoonLabel__ === "function") {
         const mid = f.clone().add(t).multiplyScalar(0.5);
-        // Offset up + a hair toward the camera so the label never gets
-        // occluded by the line itself.
         mid.y += 0.4;
-        const sprite = __cartoonLabel__(ln.label, [mid.x, mid.y, mid.z], color);
-        scene.add(sprite);
+        scene.add(__cartoonLabel__(ln.label, [mid.x, mid.y, mid.z], color));
       }
     }
   }
   scene.add(lineGroup);
 
-  // fit-to-scene
+  // fit-to-scene (P0)
   scene.updateMatrixWorld(true);
   const bbox = new THREE.Box3().setFromObject(scene);
   const center = new THREE.Vector3();
@@ -316,12 +333,23 @@ export default function(canvas, view, lines) {
   camera.position.copy(center).add(unitDir.multiplyScalar(distance));
   camera.lookAt(center);
 
+  // *** P3b: pin scene + camera onto globalThis so the host's
+  // follow rAF can read them. The host cleans these up after the
+  // LLM function returns. If you omit this, P3b step follow is
+  // disabled but the rest of the scene still works.
+  globalThis.__cartoonScene__ = scene;
+  globalThis.__cartoonCamera__ = camera;
+
   let stopped = false;
   let paused = false;
   const clock = new THREE.Clock();
   function tick() {
     if (stopped) return;
-    if (!paused) stick.rotation.z = clock.getElapsedTime() * 0.4;
+    if (!paused) {
+      // a tiny per-tick rotation so the scene feels alive even with no steps
+      stickA.rotation.z = Math.sin(clock.getElapsedTime() * 0.5) * 0.05;
+      stickB.rotation.z = -Math.sin(clock.getElapsedTime() * 0.5) * 0.05;
+    }
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
   }
@@ -354,7 +382,7 @@ export function buildSystemPrompt(): string {
 
 # Steps guidance (the verbal explanation timeline)
 
-- Each \`steps[]\` element is \`{ "t": <number>, "text": "<Chinese>" }\`. \`t\` is the offset in SECONDS from animation start when the side-panel highlight should jump to this step.
+- Each \`steps[]\` element is \`{ "t": <number>, "text": "<Chinese>", "focus": { "mesh": "<name>" }?, "camera": [x, y, z]? }\`. \`t\` is the offset in SECONDS from animation start when the side-panel highlight should jump to this step.
 - Generate 3-8 steps that match the natural phases of the animation. Common shape:
   - Step 1 (t≈0):   "题目描述" / restate the problem in your own words
   - Step 2 (t≈1-2): "列出已知量" / enumerate the given numbers (e.g. "甲 60km/h，乙 40km/h，距离 100km")
@@ -364,6 +392,10 @@ export function buildSystemPrompt(): string {
 - All \`text\` MUST be in Chinese (the user is a Chinese student). Keep each step to ≤30 Chinese characters — short and punchy.
 - \`t\` values must be monotonically non-decreasing and within the animation duration. Aim for one step every 1-3 seconds of animation.
 - If the animation has no obvious phases (e.g. a single static rotation), still produce 3 steps: "读题" → "开始旋转" → "结论".
+- **P3b step follow** (optional, but emit when natural):
+  - \`focus.mesh\`: the \`name\` of the mesh this step is "about" (e.g. \`"carA"\`). The host will swap an amber emissive highlight onto that mesh when the playhead crosses this step's \`t\`. The mesh MUST have its \`.name\` set in the code; see Example 4.
+  - \`camera\`: a \`[x, y, z]\` world-space position the camera should glide to for this step. Omit to keep the camera put.
+  - Don't add \`focus\` / \`camera\` to EVERY step — only the steps where the user would notice a camera jump or a highlight.
 
 # Lines guidance (3D auxiliary lines drawn on top of the scene)
 

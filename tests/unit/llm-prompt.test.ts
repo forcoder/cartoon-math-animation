@@ -61,6 +61,13 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toMatch(/__cartoonLabel__\(ln\.label/);
   });
 
+  it("documents the P3b per-step focus + camera follow (optional)", () => {
+    expect(prompt).toMatch(/focus.*mesh/);
+    expect(prompt).toMatch(/camera.*\[[\s\S]*x.*y.*z[\s\S]*\]/);
+    // Example 4 must show the mesh.name pattern
+    expect(prompt).toMatch(/\.name\s*=\s*["']stickA["']/);
+  });
+
   it("requires fit-to-scene camera placement (so subjects are never cropped)", () => {
     // The user reported "需要能看到整个所有的主体" — without fit, far-apart
     // objects get cropped at the side / horizontal views.
