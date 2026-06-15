@@ -50,8 +50,15 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toMatch(/THREE\.Line/);
   });
 
-  it("includes Example 4 demonstrating the lines[] pattern", () => {
+  it("documents the `__cartoonLabel__` Sprite factory (P2 text labels)", () => {
+    expect(prompt).toMatch(/__cartoonLabel__/);
+    expect(prompt).toMatch(/Sprite/);
+  });
+
+  it("includes Example 4 demonstrating the lines[] pattern + label Sprite", () => {
     expect(prompt).toMatch(/Example\s+4/);
+    // Example 4 must reference both the line-drawing AND the label sprite
+    expect(prompt).toMatch(/__cartoonLabel__\(ln\.label/);
   });
 
   it("requires fit-to-scene camera placement (so subjects are never cropped)", () => {

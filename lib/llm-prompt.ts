@@ -244,10 +244,12 @@ export default function(canvas, view, lines) {
   return { stop: () => { stopped = true; renderer.dispose(); }, setPaused: (p) => { paused = p; clock.getDelta(); } };
 }
 
-// Example 4 — Stick partition with auxiliary lines (the new "lines" capability)
+// Example 4 — Stick partition with auxiliary lines AND text labels (P2)
 //   * Demonstrates drawing 3D lines from the \`lines\` argument using
-//     THREE.BufferGeometry + THREE.Line / THREE.LineSegments
-//   * Shows the canonical "draw distance marker / divider / guide" patterns
+//     THREE.BufferGeometry + THREE.Line
+//   * Demonstrates calling \`__cartoonLabel__(text, position, color)\` to
+//     render a Chinese (or any Unicode) text label as a Three.js Sprite.
+//     The Sprite is always camera-facing, so the label stays readable.
 //   * Defensive: empty \`lines\` is a no-op, NOT an error
 export default function(canvas, view, lines) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -269,18 +271,29 @@ export default function(canvas, view, lines) {
   scene.add(sun);
 
   // *** The lines[] pattern — draw each entry as a LineSegments group ***
-  // Use a single THREE.Group to hold all line objects so cleanup is one dispose() call.
+  // AND label each one via __cartoonLabel__() so the user sees what
+  // each line MEANS (e.g. "4cm", "分割点"). Labels float above the
+  // line midpoint; the host auto-disposes their textures on unmount.
   const lineGroup = new THREE.Group();
   lineGroup.name = "aux-lines";
   if (Array.isArray(lines)) {
     for (const ln of lines) {
       if (!ln || !Array.isArray(ln.from) || !Array.isArray(ln.to)) continue;
-      const geom = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(ln.from[0] || 0, ln.from[1] || 0, ln.from[2] || 0),
-        new THREE.Vector3(ln.to[0]   || 0, ln.to[1]   || 0, ln.to[2]   || 0),
-      ]);
-      const mat = new THREE.LineBasicMaterial({ color: (typeof ln.color === "number") ? ln.color : 0x1e293b });
+      const f = new THREE.Vector3(ln.from[0] || 0, ln.from[1] || 0, ln.from[2] || 0);
+      const t = new THREE.Vector3(ln.to[0]   || 0, ln.to[1]   || 0, ln.to[2]   || 0);
+      const geom = new THREE.BufferGeometry().setFromPoints([f, t]);
+      const color = (typeof ln.color === "number") ? ln.color : 0x1e293b;
+      const mat = new THREE.LineBasicMaterial({ color });
       lineGroup.add(new THREE.Line(geom, mat));
+      // Label (if any) — sit on top of the line midpoint
+      if (typeof ln.label === "string" && ln.label.length > 0 && typeof __cartoonLabel__ === "function") {
+        const mid = f.clone().add(t).multiplyScalar(0.5);
+        // Offset up + a hair toward the camera so the label never gets
+        // occluded by the line itself.
+        mid.y += 0.4;
+        const sprite = __cartoonLabel__(ln.label, [mid.x, mid.y, mid.z], color);
+        scene.add(sprite);
+      }
     }
   }
   scene.add(lineGroup);
@@ -356,7 +369,7 @@ export function buildSystemPrompt(): string {
 
 - The \`lines\` array carries 0-N entries; each entry is:
   \`{ "from": [x, y, z], "to": [x, y, z], "color": <integer>, "label": "<optional Chinese text>" }\`
-  \`color\` is a Three.js hex int (e.g. \`0xef4444\` for red). \`label\` is reserved for P2 Sprite text and is not rendered yet — but emit it when natural.
+  \`color\` is a Three.js hex int (e.g. \`0xef4444\` for red). \`label\` is rendered as a Chinese text Sprite next to the line (P2) — emit it whenever the line's meaning is non-obvious.
 - Emit lines for things the user would otherwise have to imagine:
   - **Distance markers** (行程/几何): a line spanning two points + a label like \`"100km"\`
   - **Dividers / split marks** (切分/分数): a thin line at the cut point, perpendicular to the parent
@@ -364,7 +377,10 @@ export function buildSystemPrompt(): string {
   - **Angle bisectors / height markers** (几何): a line from a vertex to the opposite side
   - **Grid tick marks** (刻度): short lines every unit along an axis
 - Emit 0 lines if no obvious candidates exist (e.g. a single rotating stick with no companion objects). An empty \`[]\` is correct.
-- In your \`code\`, iterate \`lines\` and add a \`THREE.Line\` per entry to the scene (see Example 4). Default color \`0x1e293b\` (slate-800) if \`color\` is missing.
+- In your \`code\`, iterate \`lines\` and:
+  1. Add a \`THREE.Line\` per entry to the scene (see Example 4).
+  2. **If \`ln.label\` is present, call \`__cartoonLabel__(ln.label, position, color)\` to get a Sprite, then \`scene.add(sprite)\`**. Position the sprite at the line's midpoint with \`y += 0.4\` so it floats above the line. The host disposes Sprite textures on unmount.
+- Default color \`0x1e293b\` (slate-800) if \`color\` is missing.
 - Colors cheat sheet: distance/path \`0x64748b\` (slate-500), divider \`0xef4444\` (red), highlight \`0x22c55e\` (green), answer \`0x3b82f6\` (blue).
 - \`THREE.LineBasicMaterial\` does NOT support \`linewidth > 1\` on most browsers — keep the contract honest and never rely on thick lines.
 

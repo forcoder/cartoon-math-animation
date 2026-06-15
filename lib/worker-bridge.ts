@@ -33,6 +33,8 @@
 
 import type { SandboxMessage, SandboxResponse } from './worker-types';
 import type { RenderLine } from './types';
+import { makeTextSprite, placeLabelForLine, disposeTextSprite } from './three-text';
+import type { Sprite } from 'three';
 
 export type ViewName = 'default' | 'top' | 'side';
 
@@ -167,6 +169,26 @@ export async function mountAnimation(
   const originalThree: unknown = (globalThis as Record<string, unknown>).THREE;
   (globalThis as Record<string, unknown>).THREE = THREE;
 
+  // P2: Sprite factory injected as a global so the LLM function can
+  // call `__cartoonLabel__(text, position, color)` and get back a
+  // THREE.Sprite whose texture is the text rendered with the browser's
+  // CJK font fallback. We track every sprite we hand out so cleanup
+  // can dispose their GPU resources (texture + material) on unmount.
+  const labelSprites: Sprite[] = [];
+  const labelFactory = (
+    text: string,
+    position?: [number, number, number],
+    color?: number,
+  ): Sprite => {
+    const sprite = makeTextSprite(text, { color });
+    if (position) sprite.position.set(position[0], position[1], position[2]);
+    labelSprites.push(sprite);
+    return sprite;
+  };
+  const hadLabel = Object.prototype.hasOwnProperty.call(globalThis, '__cartoonLabel__');
+  const originalLabel: unknown = (globalThis as Record<string, unknown>).__cartoonLabel__;
+  (globalThis as Record<string, unknown>).__cartoonLabel__ = labelFactory;
+
   try {
     const scriptBody = stripExportDefault(code);
     // The body has already been transformed so `export default fn`
@@ -212,7 +234,29 @@ export async function mountAnimation(
     } else {
       delete (globalThis as Record<string, unknown>).THREE;
     }
+    if (hadLabel) {
+      (globalThis as Record<string, unknown>).__cartoonLabel__ = originalLabel;
+    } else {
+      delete (globalThis as Record<string, unknown>).__cartoonLabel__;
+    }
   }
+
+  // Wrap the LLM's cleanup so we also dispose the host-owned Sprite
+  // textures + materials. LLM cleanup runs first (stops the rAF loop,
+  // disposes the renderer + meshes it created), then we free our
+  // CanvasTextures. Order matters: if we disposed first, the LLM
+  // function could still try to render one more frame.
+  const innerCleanup = cleanup;
+  cleanup = () => {
+    try {
+      innerCleanup();
+    } finally {
+      for (const s of labelSprites) {
+        disposeTextSprite(s);
+      }
+      labelSprites.length = 0;
+    }
+  };
 
   return { cleanup };
 }
