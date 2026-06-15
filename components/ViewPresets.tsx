@@ -8,7 +8,7 @@ interface ViewPresetsProps {
 }
 
 const VIEWS: { key: ViewName; label: string }[] = [
-  { key: 'default', label: '默认' },
+  { key: 'default', label: '水平' },
   { key: 'top', label: '俯视' },
   { key: 'side', label: '侧面' },
 ];

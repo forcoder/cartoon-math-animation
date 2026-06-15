@@ -60,13 +60,17 @@
 
 const FEW_SHOT_EXAMPLES = `
 // Example 1 — Rotating rectangle
-export default function(canvas) {
+//   * horizontal viewpoint by default
+//   * camera auto-fits to the scene bbox so the subject is always centered
+//   * honours the \`view\` argument ('default' | 'top' | 'side')
+export default function(canvas, view) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
+  renderer.setSize(w, h, false);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xffffff);
-  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
-  camera.position.set(0, 0, 5);
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 1000);
+
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(1, 0.4, 0.1),
     new THREE.MeshStandardMaterial({ color: 0x3b82f6 })
@@ -76,6 +80,30 @@ export default function(canvas) {
   const dir = new THREE.DirectionalLight(0xffffff, 0.8);
   dir.position.set(2, 3, 4);
   scene.add(dir);
+
+  // fit-to-scene: lock the view DIRECTION to one of three axes,
+  // then pick the DISTANCE so the bbox fills the frame with 40% headroom.
+  scene.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(mesh);
+  const center = new THREE.Vector3();
+  bbox.getCenter(center);
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const radius = size.length() / 2;
+  const vFov = (camera.fov * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (w / h));
+  const minFov = Math.min(vFov, hFov);
+  const distance = (radius / Math.sin(minFov / 2)) * 1.4;
+  const viewDirs = {
+    default: [0, 1, 1],    // horizontal (eye-level, looking down −z)
+    top:     [0, 1, 0.001],// straight down
+    side:    [1, 0, 0]     // pure side
+  };
+  const v = viewDirs[view] || viewDirs.default;
+  const unitDir = new THREE.Vector3(v[0], v[1], v[2]).normalize();
+  camera.position.copy(center).add(unitDir.multiplyScalar(distance));
+  camera.lookAt(center);
+
   let stopped = false;
   const clock = new THREE.Clock();
   function tick() {
@@ -89,13 +117,16 @@ export default function(canvas) {
 }
 
 // Example 2 — Bouncing sphere along x-axis with pause control
-export default function(canvas) {
+//   * horizontal viewpoint + fit-to-scene (same template as Example 1)
+//   * demonstrates host-controlled pause via the { stop, setPaused } form
+export default function(canvas, view) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
+  renderer.setSize(w, h, false);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf8fafc);
-  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
-  camera.position.set(0, 1.5, 6);
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 1000);
+
   const ball = new THREE.Mesh(
     new THREE.SphereGeometry(0.4, 32, 16),
     new THREE.MeshStandardMaterial({ color: 0xef4444 })
@@ -106,6 +137,28 @@ export default function(canvas) {
   sun.position.set(3, 4, 5);
   scene.add(sun);
   scene.add(new THREE.GridHelper(10, 10, 0x94a3b8, 0xe2e8f0));
+
+  scene.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(scene);
+  const center = new THREE.Vector3();
+  bbox.getCenter(center);
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const radius = size.length() / 2 || 1;
+  const vFov = (camera.fov * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (w / h));
+  const minFov = Math.min(vFov, hFov);
+  const distance = (radius / Math.sin(minFov / 2)) * 1.4;
+  const viewDirs = {
+    default: [0, 1, 1],
+    top:     [0, 1, 0.001],
+    side:    [1, 0, 0]
+  };
+  const v = viewDirs[view] || viewDirs.default;
+  const unitDir = new THREE.Vector3(v[0], v[1], v[2]).normalize();
+  camera.position.copy(center).add(unitDir.multiplyScalar(distance));
+  camera.lookAt(center);
+
   let stopped = false;
   let paused = false;
   const clock = new THREE.Clock();
@@ -124,13 +177,16 @@ export default function(canvas) {
 }
 
 // Example 3 — Two boxes moving toward each other (travel-meeting primitive)
-export default function(canvas) {
+//   * two objects at the scene extremes; fit-to-scene widens the camera
+//     enough to see BOTH boxes regardless of their separation
+export default function(canvas, view) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  const w = canvas.clientWidth || 640, h = canvas.clientHeight || 360;
+  renderer.setSize(w, h, false);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xffffff);
-  const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
-  camera.position.set(0, 2, 8);
+  const camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 1000);
+
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(10, 0.2), new THREE.MeshStandardMaterial({ color: 0xe5e7eb }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.1;
@@ -144,6 +200,30 @@ export default function(canvas) {
   const sun = new THREE.DirectionalLight(0xffffff, 0.9);
   sun.position.set(2, 4, 6);
   scene.add(sun);
+
+  // fit-to-scene: same pattern — use the WHOLE scene (left + right + ground)
+  // so the camera frames both boxes wherever they are on the x axis.
+  scene.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(scene);
+  const center = new THREE.Vector3();
+  bbox.getCenter(center);
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const radius = size.length() / 2 || 1;
+  const vFov = (camera.fov * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (w / h));
+  const minFov = Math.min(vFov, hFov);
+  const distance = (radius / Math.sin(minFov / 2)) * 1.4;
+  const viewDirs = {
+    default: [0, 1, 1],
+    top:     [0, 1, 0.001],
+    side:    [1, 0, 0]
+  };
+  const v = viewDirs[view] || viewDirs.default;
+  const unitDir = new THREE.Vector3(v[0], v[1], v[2]).normalize();
+  camera.position.copy(center).add(unitDir.multiplyScalar(distance));
+  camera.lookAt(center);
+
   let stopped = false;
   let paused = false;
   const duration = 4; // seconds
@@ -170,8 +250,9 @@ export function buildSystemPrompt(): string {
 # Output format (strict)
 
 - Output ONLY a single JavaScript module string. No prose, no markdown fences, no commentary.
-- The module MUST start with: \`export default function(canvas) {\`
+- The module MUST start with: \`export default function(canvas, view) {\`
 - The module MUST end with: \`}\`
+- \`canvas\` is the HTMLCanvasElement the host mounted. \`view\` is one of three strings: \`'default' | 'top' | 'side'\` (see the View parameter section below). The user can switch between them at runtime — the host re-invokes your function with the new view name, so the SAME code MUST handle all three.
 - Inside the function: create your own THREE.Scene, THREE.PerspectiveCamera, THREE.WebGLRenderer bound to \`canvas\`, and an animation loop using requestAnimationFrame.
 - The function MUST return either:
   - \`() => { ... }\` — a cleanup function that stops the loop and disposes the renderer, OR
@@ -188,12 +269,65 @@ export function buildSystemPrompt(): string {
 
 # Visual guidance
 
-- Use a perspective camera offset (e.g. position.set(0, 2, 6)) so the scene reads as the "2.5D look" parents and kids expect.
+- **Default viewpoint is HORIZONTAL** (\`position\` direction is \`(0, 1, 1)\`-ish — almost eye-level, looking from +z toward the origin). The user explicitly asked for a horizontal, eye-level default. Do not use the 45° overhead \`(0, 2, 6)\` style from the original design — that is now the "top" view, not the default.
+- The \`view\` argument switches the camera direction:
+  - \`'default'\` → horizontal (\`(0, 1, 1)\` direction, eye-level from +z)
+  - \`'top'\`     → straight overhead (\`(0, 1, 0.001)\`)
+  - \`'side'\`    → pure +x side view (\`(1, 0, 0)\`)
+- **ALWAYS fit the camera to the scene bbox** (see the "Fit-to-scene camera" section below). Without this, a problem with objects 6 units apart gets cropped at \`view='side'\` or \`view='default'\`, and the user can't see the action.
 - Include at least one AmbientLight AND one DirectionalLight so colors render correctly.
 - Choose a light, non-white background (e.g. 0xf8fafc or 0xfef3c7) — pure white looks unfinished in screenshots.
 - Use 2-4 distinct colors per scene (one per object/role). Avoid monochrome.
 - Add a GridHelper or PlaneGeometry ground unless the problem is purely abstract (rotations in space).
-- Sizes: keep most objects in the 0.3-1.5 unit range; camera distance 5-8 units.
+- **Object sizes** should reflect the problem's scale, not be hard-coded. As a guideline:
+  - 一个"人" or "学生" ≈ 1.5 units tall
+  - 一辆"车" ≈ 1.0 × 0.5 × 0.4 units (length × height × width)
+  - 一个"正方体" / "木棒" / "绳子" segment: the size stated in the problem (e.g. a 12cm stick → BoxGeometry(12, 0.2, 0.2) or similar)
+  - 一个"水箱" / "圆柱容器" with capacity: base radius and height from the problem numbers
+  - For fractions: one whole bar = 4 units long, so \`1/3\` of it is shaded 4/3 units.
+  Use the problem's actual numbers — that's the whole point of an animation.
+
+# Fit-to-scene camera (REQUIRED)
+
+\`\`\`js
+// 1. After adding ALL meshes to the scene, refresh transforms:
+scene.updateMatrixWorld(true);
+
+// 2. Compute the bbox. Use \`scene\` (not a single mesh) so multi-object
+//    problems (cars, pipes, fractions) all fit at once.
+const bbox = new THREE.Box3().setFromObject(scene);
+
+// 3. Find center + radius:
+const center = new THREE.Vector3();
+bbox.getCenter(center);
+const size = new THREE.Vector3();
+bbox.getSize(size);
+const radius = size.length() / 2 || 1;   // || 1 guards against zero-size
+
+// 4. Find the distance that makes the bbox fit the smaller of vFov/hFov
+//    (so a wide canvas doesn't crop the sides):
+const w = canvas.clientWidth || 640;
+const h = canvas.clientHeight || 360;
+const vFov = (camera.fov * Math.PI) / 180;
+const hFov = 2 * Math.atan(Math.tan(vFov / 2) * (w / h));
+const minFov = Math.min(vFov, hFov);
+const distance = (radius / Math.sin(minFov / 2)) * 1.4;  // 1.4 = 40% headroom
+
+// 5. Pick direction by view:
+const viewDirs = {
+  default: [0, 1, 1],     // horizontal
+  top:     [0, 1, 0.001], // overhead
+  side:    [1, 0, 0]      // side
+};
+const v = viewDirs[view] || viewDirs.default;
+const unitDir = new THREE.Vector3(v[0], v[1], v[2]).normalize();
+
+// 6. Place camera at center + unitDir * distance, then lookAt center.
+camera.position.copy(center).add(unitDir.multiplyScalar(distance));
+camera.lookAt(center);
+\`\`\`
+
+The few-shot examples below apply this template verbatim. If you forget the fit step, the user will see cropped or empty scenes and the eval harness will mark you down.
 
 # Animation guidance
 

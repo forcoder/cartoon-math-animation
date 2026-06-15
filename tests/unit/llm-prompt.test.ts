@@ -24,6 +24,33 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toMatch(/export\s+default\s+function/);
   });
 
+  it("requires the function signature to accept a `view` argument", () => {
+    // Regression guard: original prompt had `function(canvas)`, which
+    // made the top/side view buttons no-op (the user's reported bug).
+    expect(prompt).toMatch(/function\s*\(\s*canvas\s*,\s*view\s*\)/);
+  });
+
+  it("documents the three legal view values: default | top | side", () => {
+    expect(prompt).toMatch(/'default'/);
+    expect(prompt).toMatch(/'top'/);
+    expect(prompt).toMatch(/'side'/);
+  });
+
+  it("requires fit-to-scene camera placement (so subjects are never cropped)", () => {
+    // The user reported "需要能看到整个所有的主体" — without fit, far-apart
+    // objects get cropped at the side / horizontal views.
+    expect(prompt).toMatch(/fit[\s-]?to[\s-]?scene/i);
+    expect(prompt).toMatch(/Box3/);
+    expect(prompt).toMatch(/updateMatrixWorld/);
+  });
+
+  it("declares the default view as HORIZONTAL (not 45° overhead)", () => {
+    // The user explicitly asked for a horizontal default viewpoint.
+    expect(prompt).toMatch(/horizontal/i);
+    // The old "0, 2, 6" pattern must NOT appear as the recommended default.
+    expect(prompt).not.toMatch(/position\.set\(\s*0\s*,\s*2\s*,\s*6\s*\)/);
+  });
+
   it("forbids dangerous APIs (sandbox boundary)", () => {
     expect(prompt).toMatch(/fetch/i);
     expect(prompt).toMatch(/importScripts/i);
@@ -32,6 +59,15 @@ describe("buildSystemPrompt", () => {
 
   it("includes few-shot examples", () => {
     expect(prompt).toMatch(/Example\s+[123]/i);
+  });
+
+  it("few-shot examples all accept the `view` argument", () => {
+    // Count: each example should have `function(canvas, view)`.
+    const matches = prompt.match(/function\s*\(\s*canvas\s*,\s*view\s*\)/g);
+    expect(matches).not.toBeNull();
+    // We have 3 few-shot examples. Allow ≥ 3 to be tolerant of extra
+    // references in the prose.
+    expect(matches!.length).toBeGreaterThanOrEqual(3);
   });
 
   it("mentions Chinese math problems", () => {

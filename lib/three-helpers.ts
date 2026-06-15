@@ -22,7 +22,11 @@ import {
   Color,
   AmbientLight,
   DirectionalLight,
+  Box3,
+  Vector3,
 } from 'three';
+
+export type ViewName = 'default' | 'top' | 'side';
 
 export interface SceneContext {
   scene: Scene;
@@ -31,20 +35,33 @@ export interface SceneContext {
 }
 
 export interface ViewPreset {
+  /** Camera position. The view direction (default→z axis, top→y axis, side→x axis)
+   *  is implicit in the key. Fit-to-scene scales the distance from the lookAt point
+   *  but preserves the direction. */
   cameraPosition: [number, number, number];
   cameraLookAt: [number, number, number];
 }
 
-export const VIEW_PRESETS: Readonly<Record<'default' | 'top' | 'side', ViewPreset>> = {
+/**
+ * View preset = direction (where the camera is looking from) + a SEED distance.
+ * `fitCameraToScene` recomputes the actual distance from scene bbox, but the
+ * direction is always one of these three — never arbitrary.
+ */
+export const VIEW_PRESETS: Readonly<Record<ViewName, ViewPreset>> = {
   default: {
-    cameraPosition: [5, 5, 8],
+    // Horizontal viewpoint: nearly eye-level (y=1) looking down the −z axis.
+    // Matches the user's request: "默认使用水平视角".
+    cameraPosition: [0, 1, 12],
     cameraLookAt: [0, 0, 0],
   },
   top: {
+    // Top-down: camera is straight above, looking straight down.
+    // Tiny z offset (0.001) so the lookAt direction is well-defined.
     cameraPosition: [0, 12, 0.001],
     cameraLookAt: [0, 0, 0],
   },
   side: {
+    // Pure side view: camera on +x axis, looking at origin.
     cameraPosition: [12, 0, 0],
     cameraLookAt: [0, 0, 0],
   },
@@ -52,6 +69,7 @@ export const VIEW_PRESETS: Readonly<Record<'default' | 'top' | 'side', ViewPrese
 
 export const FRAME_BUDGET = 1800; // 60fps × 30s, per design doc
 export const DEFAULT_BG_COLOR = 0xf8fafc; // slate-50 — matches the page chrome
+export const FIT_PADDING = 1.4; // 40% headroom so objects don't kiss the frustum edge
 
 /**
  * Create a Scene, PerspectiveCamera, and WebGLRenderer bound to the
@@ -146,9 +164,97 @@ export function startRenderLoop(
  * user clicks a preset button and the camera needs to snap to a new
  * vantage point.
  */
-export function applyViewPreset(camera: PerspectiveCamera, view: keyof typeof VIEW_PRESETS): void {
+export function applyViewPreset(camera: PerspectiveCamera, view: ViewName): void {
   const preset = VIEW_PRESETS[view];
   camera.position.set(...preset.cameraPosition);
   camera.lookAt(...preset.cameraLookAt);
+  camera.updateProjectionMatrix();
+}
+
+/**
+ * Compute a bounding box that contains every visible mesh in the scene.
+ * Lights, helpers, and groups without geometry are excluded — we only
+ * care about things that should be inside the camera frustum.
+ *
+ * If the scene is empty (or contains only lights/helpers), returns null
+ * so the caller can fall back to a default camera placement.
+ */
+export function computeSceneBoundingBox(scene: Scene): Box3 | null {
+  const bbox = new Box3();
+  let hasGeometry = false;
+  scene.traverse((obj) => {
+    // Mesh.isMesh narrows the type but `as any` here would lose the
+    // type-narrowing benefit. Use a direct property check instead.
+    if ((obj as { isMesh?: boolean }).isMesh === true) {
+      const mesh = obj as import('three').Mesh;
+      if (mesh.geometry) {
+        mesh.geometry.computeBoundingBox();
+        if (mesh.geometry.boundingBox) {
+          bbox.union(mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld));
+          hasGeometry = true;
+        }
+      }
+    }
+  });
+  return hasGeometry ? bbox : null;
+}
+
+/**
+ * Position the camera so EVERY visible mesh in the scene fits inside the
+ * frustum, with a 40% padding headroom by default. The view direction
+ * is locked to one of the three `VIEW_PRESETS` (horizontal / top-down /
+ * side) — fit-to-scene only changes the DISTANCE, never the direction.
+ *
+ * Math:
+ *   requiredDistance = boundingSphereRadius / sin(fov/2)
+ *   account for the canvas aspect ratio so wide/tall canvases still fit
+ *
+ * Call this AFTER all meshes have been added to the scene and AFTER
+ * scene.updateMatrixWorld(true) (otherwise mesh.matrixWorld is stale).
+ */
+export function fitCameraToScene(
+  scene: Scene,
+  camera: PerspectiveCamera,
+  view: ViewName,
+  padding: number = FIT_PADDING,
+): void {
+  const bbox = computeSceneBoundingBox(scene);
+  const preset = VIEW_PRESETS[view];
+
+  if (!bbox) {
+    // No geometry to frame — just snap to the preset as-is.
+    camera.position.set(...preset.cameraPosition);
+    camera.lookAt(...preset.cameraLookAt);
+    camera.updateProjectionMatrix();
+    return;
+  }
+
+  const center = new Vector3();
+  bbox.getCenter(center);
+
+  // Bounding-sphere radius from the bbox diagonal — over-estimates the
+  // true sphere, but the padding factor absorbs that slack.
+  const size = new Vector3();
+  bbox.getSize(size);
+  const bboxRadius = size.length() / 2;
+
+  // PerspectiveCamera.fov is the VERTICAL fov in degrees. Convert and
+  // adjust for aspect ratio so a wide canvas doesn't crop the sides.
+  const vFovRad = (camera.fov * Math.PI) / 180;
+  const aspect = camera.aspect;
+  const hFovRad = 2 * Math.atan(Math.tan(vFovRad / 2) * aspect);
+  const minFovRad = Math.min(vFovRad, hFovRad);
+  const distance = (bboxRadius / Math.sin(minFovRad / 2)) * padding;
+
+  // Direction = unit vector from preset.position to preset.lookAt.
+  // Place the camera at `center + direction * distance` so the bbox
+  // center lands at the lookAt point and the scene fills the frame.
+  const dir = new Vector3()
+    .fromArray(preset.cameraPosition)
+    .sub(new Vector3().fromArray(preset.cameraLookAt))
+    .normalize();
+
+  camera.position.copy(center).add(dir.multiplyScalar(distance));
+  camera.lookAt(center);
   camera.updateProjectionMatrix();
 }
