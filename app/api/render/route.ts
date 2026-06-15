@@ -1,21 +1,25 @@
 /**
  * POST /api/render — Generate Three.js code for a math problem.
  *
- * Pipeline (per eng review 2026-06-14):
+ * Pipeline (per eng review 2026-06-14 + 2026-06-15 步骤/讲解 feature):
  *   1. Validate request body (zod-style manual checks; no zod dep needed here).
  *   2. Validate invite code against ALLOWED_INVITE_CODES.
  *   3. SHA-256 hash the problem text.
- *   4. Look up Upstash cache → on hit, return cached code immediately.
+ *   4. Look up Upstash cache → on hit, return cached result immediately.
  *   5. Call LLM via lib/llm-prompt.ts (with 1 retry via lib/llm-retry.ts).
- *   6. Cache the LLM response under the problem hash.
- *   7. Return { code, latency, fromCache }.
+ *   6. Parse the LLM response with lib/parse-llm-response.ts — it must
+ *      tolerate prose, fences, and bare code so a misbehaving model
+ *      never crashes the route.
+ *   7. Cache the parsed result under the problem hash.
+ *   8. Return { code, steps, lines, latency, fromCache }.
  *
  * Failure modes:
  *   - 400: malformed body / empty problem
  *   - 401: invite code rejected
  *   - 500: LLM failed after retries (error.retryable reflects whether the
  *     client should show "再试一次" — false for parse / 4xx, true for 5xx)
- *   - 502: LLM returned unusable output (non-retryable — retrying won't help)
+ *   - 502: LLM returned unusable output (no code at all, even after
+ *     tolerant parsing)
  *
  * Latency budget: cache hit <2s, miss ≤60s end-to-end. We measure latency
  * from request entry → response ready, not just the LLM call. This catches
@@ -32,7 +36,8 @@ import { getLLMClient, resolveModel, DEFAULT_TEMPERATURE } from "@/lib/llm-clien
 import { buildSystemPrompt, buildUserPrompt } from "@/lib/llm-prompt";
 import { withRetry } from "@/lib/llm-retry";
 import { validateInviteCode } from "@/lib/invite";
-import { getCachedCode, setCachedCode } from "@/lib/cache";
+import { getCachedResult, setCachedResult } from "@/lib/cache";
+import { parseLlmResponse } from "@/lib/parse-llm-response";
 import type {
   ErrorResponse,
   RenderRequest,
@@ -70,19 +75,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const problemHash = sha256(problem);
 
   // ---------- 4. Cache lookup ----------
-  const cached = await getCachedCode(problemHash);
+  const cached = await getCachedResult(problemHash);
   if (cached !== null) {
     return NextResponse.json<RenderResponse>({
-      code: cached,
+      code: cached.code,
+      steps: cached.steps,
+      lines: cached.lines,
       latency: Date.now() - startedAt,
       fromCache: true,
     });
   }
 
   // ---------- 5. LLM call (with retry) ----------
-  let generatedCode: string;
+  let rawLlm: string;
   try {
-    generatedCode = await withRetry(() => callLlm(problem));
+    rawLlm = await withRetry(() => callLlm(problem));
   } catch (err) {
     const retryable = isUpstreamRetryable(err);
     const message = retryable
@@ -93,9 +100,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return jsonError(500, message, retryable);
   }
 
-  // Defensive: if the LLM didn't return parseable code, surface a clear error.
-  if (!looksLikeThreeJsModule(generatedCode)) {
-    console.error("[render] LLM returned non-code output:", generatedCode.slice(0, 200));
+  // ---------- 6. Parse the LLM response (tolerant) ----------
+  const result = parseLlmResponse(rawLlm);
+
+  if (!result.code || !looksLikeThreeJsModule(result.code)) {
+    console.error(
+      "[render] LLM returned non-code output:",
+      rawLlm.slice(0, 200),
+    );
     return jsonError(
       502,
       "AI 没生成出可用的代码，请修改题目或稍后再试",
@@ -103,12 +115,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // ---------- 6. Cache the result (fire-and-forget on failure) ----------
-  await setCachedCode(problemHash, generatedCode);
+  // ---------- 7. Cache the result (fire-and-forget on failure) ----------
+  await setCachedResult(problemHash, {
+    code: result.code,
+    steps: result.steps,
+    lines: result.lines,
+  });
 
-  // ---------- 7. Respond ----------
+  // ---------- 8. Respond ----------
   return NextResponse.json<RenderResponse>({
-    code: generatedCode,
+    code: result.code,
+    steps: result.steps,
+    lines: result.lines,
     latency: Date.now() - startedAt,
     fromCache: false,
   });
@@ -172,19 +190,7 @@ async function callLlm(problem: string): Promise<string> {
   if (typeof raw !== "string" || raw.trim().length === 0) {
     throw new Error("LLM returned empty content");
   }
-  return stripMarkdownFences(raw);
-}
-
-/**
- * LLMs occasionally wrap code in ```js ... ``` fences even when told not to.
- * Strip them so downstream consumers (cache, sandbox) see clean JS.
- */
-function stripMarkdownFences(text: string): string {
-  // Match a leading ```lang?\n ... ``` block. If the entire response is a
-  // single fenced block, return its inner content. Otherwise return as-is.
-  const fenced = text.match(/^```(?:js|javascript|ts|typescript)?\s*\n([\s\S]*?)\n```\s*$/);
-  if (fenced) return fenced[1].trim();
-  return text.trim();
+  return raw;
 }
 
 /**

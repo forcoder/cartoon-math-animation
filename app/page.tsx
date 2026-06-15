@@ -7,6 +7,8 @@ import LoadingState from '@/components/LoadingState';
 import ErrorState from '@/components/ErrorState';
 import ViewPresets from '@/components/ViewPresets';
 import TimeAxis from '@/components/TimeAxis';
+import StepsPanel from '@/components/StepsPanel';
+import type { RenderStep, RenderLine } from '@/lib/types';
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 type ViewName = 'default' | 'top' | 'side';
@@ -21,6 +23,8 @@ export default function HomePage() {
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
   const [code, setCode] = useState<string | null>(null);
+  const [steps, setSteps] = useState<RenderStep[]>([]);
+  const [lines, setLines] = useState<RenderLine[]>([]);
   const [view, setView] = useState<ViewName>('default');
   const [duration, setDuration] = useState(30);
   const [currentTime, setCurrentTime] = useState(0);
@@ -31,6 +35,8 @@ export default function HomePage() {
     setProgress(0);
     setErrorMsg('');
     setCode(null);
+    setSteps([]);
+    setLines([]);
     const tick = setInterval(() => setProgress((p) => (p < 90 ? p + 5 : p)), 200);
     try {
       const controller = new AbortController();
@@ -45,8 +51,15 @@ export default function HomePage() {
       });
       clearTimeout(timeoutId);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { code: string; duration?: number };
+      const data = (await res.json()) as {
+        code: string;
+        steps?: RenderStep[];
+        lines?: RenderLine[];
+        duration?: number;
+      };
       setCode(data.code);
+      setSteps(Array.isArray(data.steps) ? data.steps : []);
+      setLines(Array.isArray(data.lines) ? data.lines : []);
       if (data.duration) setDuration(data.duration);
       setStatus('success');
     } catch (e: unknown) {
@@ -98,6 +111,9 @@ export default function HomePage() {
         {status === 'error' && <ErrorState error={errorMsg} onRetry={handleRetry} />}
         {showCanvas && <AnimationCanvas code={code} view={view} onError={handleMountError} />}
       </section>
+      {showCanvas && (
+        <StepsPanel steps={steps} />
+      )}
       {showCanvas && (
         <details className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
           <summary className="cursor-pointer select-none font-medium text-slate-700">

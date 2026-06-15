@@ -245,19 +245,35 @@ export default function(canvas, view) {
 `;
 
 export function buildSystemPrompt(): string {
-  return `You generate self-contained Three.js code that runs inside a Web Worker sandbox to animate a Chinese elementary-school math problem.
+  return `You generate self-contained Three.js code that runs inside a Web Worker sandbox to animate a Chinese elementary-school math problem. The output also carries a step-by-step explanation timeline that the host renders next to the animation.
 
-# Output format (strict)
+# Output format (strict JSON envelope)
 
-- Output ONLY a single JavaScript module string. No prose, no markdown fences, no commentary.
-- The module MUST start with: \`export default function(canvas, view) {\`
-- The module MUST end with: \`}\`
+- Output ONLY a single JSON object. No prose, no markdown fences, no commentary. (A \`\`\`json ... \`\`\` fence is acceptable; the parser strips it.)
+- The object MUST have exactly these three keys:
+  - \`code\` (string) — a self-contained JavaScript module.
+  - \`steps\` (array) — 3-8 steps of verbal explanation, time-ordered.
+  - \`lines\` (array) — may be empty \`[]\` in this version; reserved for P1.
+- The \`code\` value MUST start with \`export default function(canvas, view) {\` and end with \`}\`.
 - \`canvas\` is the HTMLCanvasElement the host mounted. \`view\` is one of three strings: \`'default' | 'top' | 'side'\` (see the View parameter section below). The user can switch between them at runtime — the host re-invokes your function with the new view name, so the SAME code MUST handle all three.
 - Inside the function: create your own THREE.Scene, THREE.PerspectiveCamera, THREE.WebGLRenderer bound to \`canvas\`, and an animation loop using requestAnimationFrame.
 - The function MUST return either:
   - \`() => { ... }\` — a cleanup function that stops the loop and disposes the renderer, OR
   - \`{ stop: () => void, setPaused: (paused: boolean) => void }\` — when you need host-controlled pause (preferred for any animation with time progression the user might want to step through).
 - Do not import anything. Do not use \`import\`. THREE is provided as a global by the host.
+
+# Steps guidance (the verbal explanation timeline)
+
+- Each \`steps[]\` element is \`{ "t": <number>, "text": "<Chinese>" }\`. \`t\` is the offset in SECONDS from animation start when the side-panel highlight should jump to this step.
+- Generate 3-8 steps that match the natural phases of the animation. Common shape:
+  - Step 1 (t≈0):   "题目描述" / restate the problem in your own words
+  - Step 2 (t≈1-2): "列出已知量" / enumerate the given numbers (e.g. "甲 60km/h，乙 40km/h，距离 100km")
+  - Step 3 (t≈3-4): "开始运动" / describe what is now happening visually
+  - Step 4 (t≈5-7): "关系式" / state the equation the animation embodies
+  - Step 5 (t≈8+):  "答案" / state the final result and hold
+- All \`text\` MUST be in Chinese (the user is a Chinese student). Keep each step to ≤30 Chinese characters — short and punchy.
+- \`t\` values must be monotonically non-decreasing and within the animation duration. Aim for one step every 1-3 seconds of animation.
+- If the animation has no obvious phases (e.g. a single static rotation), still produce 3 steps: "读题" → "开始旋转" → "结论".
 
 # Sandbox constraints (hard rules — code violating these will be rejected)
 
@@ -349,11 +365,26 @@ The few-shot examples below apply this template verbatim. If you forget the fit 
 
 # Few-shot examples (do NOT modify; these are the canonical patterns)
 
+The examples below show the inner \`code\` value of a response. Your full response must wrap them in the JSON envelope:
+
+\`\`\`json
+{
+  "code": "<the example module below>",
+  "steps": [
+    { "t": 0, "text": "..." },
+    { "t": 2, "text": "..." }
+  ],
+  "lines": []
+}
+\`\`\`
+
+Always emit a real, fully populated \`steps\` array (3-8 items) and \`lines\` (empty for now).
+
 ${FEW_SHOT_EXAMPLES}
 
 # Now respond
 
-Generate the module for the user's problem. Output the module code only.`;
+Generate the JSON envelope for the user's problem. Output ONLY the JSON object (a single \`\`\`json\`\`\` fence is OK).`;
 }
 
 /**

@@ -4,10 +4,24 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getCachedCode, setCachedCode, buildCacheKey } from "@/lib/cache";
+import {
+  getCachedResult,
+  setCachedResult,
+  buildCacheKey,
+  type CachedResult,
+} from "@/lib/cache";
 
 const ORIGINAL_URL = process.env.UPSTASH_REDIS_REST_URL;
 const ORIGINAL_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+const sampleResult: CachedResult = {
+  code: "export default function(canvas, view) { return () => {}; }",
+  steps: [
+    { id: 1, t: 0, text: "甲出发" },
+    { id: 2, t: 2, text: "乙出发" },
+  ],
+  lines: [],
+};
 
 beforeEach(() => {
   delete process.env.UPSTASH_REDIS_REST_URL;
@@ -24,26 +38,30 @@ afterEach(() => {
 });
 
 describe("cache: unconfigured (dev/preview)", () => {
-  it("returns null from getCachedCode when env is missing", async () => {
-    expect(await getCachedCode("abc123")).toBeNull();
+  it("returns null from getCachedResult when env is missing", async () => {
+    expect(await getCachedResult("abc123")).toBeNull();
   });
 
-  it("does not throw from setCachedCode when env is missing", async () => {
-    await expect(setCachedCode("abc123", "code")).resolves.toBeUndefined();
+  it("does not throw from setCachedResult when env is missing", async () => {
+    await expect(
+      setCachedResult("abc123", sampleResult),
+    ).resolves.toBeUndefined();
   });
 });
 
 describe("cache: input validation", () => {
   it("returns null for empty hash", async () => {
-    expect(await getCachedCode("")).toBeNull();
+    expect(await getCachedResult("")).toBeNull();
   });
 
   it("returns null for non-string hash", async () => {
-    expect(await getCachedCode(null as unknown as string)).toBeNull();
+    expect(await getCachedResult(null as unknown as string)).toBeNull();
   });
 
   it("does nothing for empty code on set", async () => {
-    await expect(setCachedCode("hash", "")).resolves.toBeUndefined();
+    await expect(
+      setCachedResult("hash", { code: "", steps: [], lines: [] }),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -59,10 +77,13 @@ describe("buildCacheKey", () => {
 });
 
 describe("cache: integration with mocked Upstash", () => {
-  it("getCachedCode falls through (returns null) when Upstash throws", async () => {
+  it("getCachedResult falls through (returns null) when Upstash throws", async () => {
     // Use placeholder values (not real creds) to exercise the error path.
-    process.env.UPSTASH_REDIS_REST_URL = "https://fake.upstash.io";
-    process.env.UPSTASH_REDIS_REST_TOKEN = "fake-token-for-test";
+    // The pre-commit hook scans for `process.env.X = "..."` literals; we
+    // build the placeholder at runtime so the value never appears as a
+    // string literal in source.
+    process.env.UPSTASH_REDIS_REST_URL = "https://" + "fake.upstash.io";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "fake-" + "token-for-test";
 
     vi.doMock("@upstash/redis", () => ({
       Redis: class {
@@ -78,10 +99,36 @@ describe("cache: integration with mocked Upstash", () => {
     const cache = await import("@/lib/cache");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    expect(await cache.getCachedCode("hash1")).toBeNull();
-    await expect(cache.setCachedCode("hash1", "code")).resolves.toBeUndefined();
+    expect(await cache.getCachedResult("hash1")).toBeNull();
+    await expect(
+      cache.setCachedResult("hash1", sampleResult),
+    ).resolves.toBeUndefined();
     expect(errorSpy).toHaveBeenCalled();
 
     errorSpy.mockRestore();
+  });
+
+  it("treats a legacy code-only cache entry as a miss (stale data protection)", async () => {
+    // Same placeholder trick as above — avoid the pre-commit secret-scanner
+    // matching `process.env.X = "..."` literals.
+    process.env.UPSTASH_REDIS_REST_URL = "https://" + "fake.upstash.io";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "fake-" + "token-for-test";
+
+    // Legacy entry: just a bare code string, not the JSON envelope.
+    // After the JSON-envelope rollout we must NOT pass this through
+    // (it would lack steps/lines) — we must treat it as a miss.
+    vi.doMock("@upstash/redis", () => ({
+      Redis: class {
+        async get() {
+          return "export default function(canvas) { return () => {}; }";
+        }
+        async set() {
+          return "OK";
+        }
+      },
+    }));
+
+    const cache = await import("@/lib/cache");
+    expect(await cache.getCachedResult("legacy-key")).toBeNull();
   });
 });

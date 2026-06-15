@@ -20,7 +20,15 @@ describe("buildSystemPrompt", () => {
     expect(prompt.length).toBeGreaterThan(500);
   });
 
-  it("specifies the output contract (export default function)", () => {
+  it("specifies the JSON envelope output (code + steps + lines)", () => {
+    // P0: LLM must wrap the module in a {code, steps, lines} JSON envelope
+    // so the route can parse steps / lines alongside the animation code.
+    expect(prompt).toMatch(/`code`\s*\(string\)/);
+    expect(prompt).toMatch(/`steps`\s*\(array\)/);
+    expect(prompt).toMatch(/`lines`\s*\(array\)/);
+  });
+
+  it("specifies the inner module signature (export default function)", () => {
     expect(prompt).toMatch(/export\s+default\s+function/);
   });
 
@@ -49,6 +57,13 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toMatch(/horizontal/i);
     // The old "0, 2, 6" pattern must NOT appear as the recommended default.
     expect(prompt).not.toMatch(/position\.set\(\s*0\s*,\s*2\s*,\s*6\s*\)/);
+  });
+
+  it("includes step-generation guidance with Chinese text requirement", () => {
+    // Steps are the new P0 deliverable — the LLM must produce 3-8
+    // time-ordered Chinese explanation steps.
+    expect(prompt).toMatch(/steps.*guidance/i);
+    expect(prompt).toMatch(/Chinese/i);
   });
 
   it("forbids dangerous APIs (sandbox boundary)", () => {
