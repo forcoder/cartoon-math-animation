@@ -120,6 +120,47 @@ describe("parseLlmResponse", () => {
     });
   });
 
+  describe("tolerance: double-JSON unwrap", () => {
+    it("peels an extra JSON envelope when the LLM embeds one in `code`", () => {
+      // Observed in production: the model emits
+      //   { "code": "{\n  \"code\": \"export default ...\", ... }", "steps": [], "lines": [] }
+      // The user-impacting fields (steps, lines) end up empty, AND the
+      // code is a JSON blob instead of a module. The parser unwraps
+      // one layer to salvage a usable result.
+      const inner = {
+        code: "export default function(canvas, view, lines) { return () => {}; }",
+        steps: [
+          { t: 0, text: "读题" },
+          { t: 2, text: "列已知" },
+        ],
+        lines: [{ from: [0, 0, 0], to: [1, 0, 0], color: 0xef4444 }],
+      };
+      const outer = {
+        code: JSON.stringify(inner),
+        steps: [],
+        lines: [],
+      };
+      const r = parseLlmResponse(JSON.stringify(outer));
+      expect(r.code).toBe(inner.code);
+      expect(r.steps.map((s) => s.text)).toEqual(["读题", "列已知"]);
+      expect(r.lines).toHaveLength(1);
+      expect(r.lines[0].color).toBe(0xef4444);
+    });
+
+    it("leaves a non-JSON `code` value alone (does not try to parse it)", () => {
+      const r = parseLlmResponse(
+        JSON.stringify({
+          code: "export default function(canvas, view) { return () => {}; }",
+          steps: [],
+          lines: [],
+        }),
+      );
+      expect(r.code).toBe(
+        "export default function(canvas, view) { return () => {}; }",
+      );
+    });
+  });
+
   describe("step array sanitization", () => {
     it("drops steps missing required fields", () => {
       const env = {

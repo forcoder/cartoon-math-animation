@@ -135,10 +135,39 @@ function finalize(obj: unknown, rawForLog: string): ParsedLlmResponse {
   if (typeof env.code !== "string" || env.code.length === 0) {
     return { code: "", steps: [], lines: [], parsedAsJson: false };
   }
+
+  // Defensive unwrap: the LLM has been observed putting a JSON object
+  // (instead of a raw JS module) inside `code`. If the inner string
+  // looks like a JSON envelope with its own `code` field, peel one
+  // layer off. This keeps a misbehaving model from cascading into
+  // 502s — at worst we drop the broken outer envelope and try the
+  // inner one.
+  let realCode = stripMarkdownFences(env.code);
+  let realSteps = env.steps;
+  let realLines = env.lines;
+  const trimmed = realCode.trimStart();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const inner = JSON.parse(trimmed) as {
+        code?: unknown;
+        steps?: unknown;
+        lines?: unknown;
+      };
+      if (typeof inner.code === "string" && inner.code.length > 0) {
+        realCode = stripMarkdownFences(inner.code);
+        if (inner.steps !== undefined) realSteps = inner.steps;
+        if (inner.lines !== undefined) realLines = inner.lines;
+      }
+    } catch {
+      // Inner wasn't valid JSON — that's fine, the outer code is the
+      // best we can do.
+    }
+  }
+
   return {
-    code: stripMarkdownFences(env.code),
-    steps: asStepArray(env.steps),
-    lines: asLineArray(env.lines),
+    code: realCode,
+    steps: asStepArray(realSteps),
+    lines: asLineArray(realLines),
     parsedAsJson: true,
   };
   // rawForLog is intentionally not used at runtime — kept for future logging.

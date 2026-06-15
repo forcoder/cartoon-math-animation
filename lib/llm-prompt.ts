@@ -458,11 +458,11 @@ The few-shot examples below apply this template verbatim. If you forget the fit 
 
 # Few-shot examples (do NOT modify; these are the canonical patterns)
 
-The examples below show the inner \`code\` value of a response. Your full response must wrap them in the JSON envelope:
+The few-shot examples below show the inner \`code\` value of a response. The full response must wrap them in the JSON envelope:
 
 \`\`\`json
 {
-  "code": "<the example module below>",
+  "code": "export default function(canvas, view, lines) { ...module body... }",
   "steps": [
     { "t": 0, "text": "..." },
     { "t": 2, "text": "..." }
@@ -471,7 +471,17 @@ The examples below show the inner \`code\` value of a response. Your full respon
 }
 \`\`\`
 
-Always emit a real, fully populated \`steps\` array (3-8 items) and \`lines\` (empty for now).
+CRITICAL — the \`code\` value MUST be a raw JavaScript module string starting with \`export default\`. Do NOT put a JSON object inside \`code\`. The wrong shape (which the model has been observed producing):
+
+\`\`\`json
+{
+  "code": "{\\n  \\"code\\": \\"export default function...\\", ...\\n}",  // ❌ WRONG — JSON inside JSON
+  "steps": [],
+  "lines": []
+}
+\`\`\`
+
+Always emit a real, fully populated \`steps\` array (3-8 items) and \`lines\` array (may be empty \`[]\`, but if you drew any lines, list them as \`{from, to, color, label}\` entries).
 
 ${FEW_SHOT_EXAMPLES}
 
