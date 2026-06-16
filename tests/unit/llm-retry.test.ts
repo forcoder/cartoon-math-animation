@@ -26,10 +26,14 @@ describe("isRetryableError", () => {
     expect(isRetryableError({ status: 429 })).toBe(false);
   });
 
-  it("returns true for transient provider error types", () => {
-    expect(isRetryableError({ type: "rate_limit_error" })).toBe(true);
+  it("returns true for transient provider error types (but NOT rate_limit_error — that goes to the fallback chain)", () => {
     expect(isRetryableError({ type: "server_error" })).toBe(true);
     expect(isRetryableError({ type: "timeout" })).toBe(true);
+    // rate_limit_error is intentionally NOT retryable at this layer —
+    // the fallback chain (lib/llm-fallback.ts) handles 429 by switching
+    // providers, which is much more effective than retrying the same
+    // rate-limited provider.
+    expect(isRetryableError({ type: "rate_limit_error" })).toBe(false);
   });
 
   it("returns true for Node-style network errors", () => {

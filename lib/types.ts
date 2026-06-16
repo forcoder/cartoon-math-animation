@@ -65,6 +65,8 @@ export interface RenderResponse {
   latency: number;
   /** True when the response came from the Upstash cache, false when freshly generated. */
   fromCache: boolean;
+  /** Which provider served this answer ("primary", "fallback-1", ...). */
+  provider: string;
 }
 
 export interface ErrorResponse {

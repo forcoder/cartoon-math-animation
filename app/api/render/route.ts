@@ -1,23 +1,28 @@
 /**
  * POST /api/render — Generate Three.js code for a math problem.
  *
- * Pipeline (per eng review 2026-06-14 + 2026-06-15 步骤/讲解 feature):
+ * Pipeline (per eng review 2026-06-14 + 2026-06-15 步骤/讲解 feature
+ * + 2026-06-16 多模型 fallback):
  *   1. Validate request body (zod-style manual checks; no zod dep needed here).
  *   2. Validate invite code against ALLOWED_INVITE_CODES.
  *   3. SHA-256 hash the problem text.
  *   4. Look up Upstash cache → on hit, return cached result immediately.
- *   5. Call LLM via lib/llm-prompt.ts (with 1 retry via lib/llm-retry.ts).
+ *      Cache key includes the provider name so a LongCat result is not
+ *      re-served as a Doubao result (they produce subtly different code).
+ *   5. Call LLM via callLlmWithFallback (primary + N-1 fallbacks;
+ *      per-provider 1-retry via lib/llm-retry.ts; fail-fast on
+ *      429/5xx/network).
  *   6. Parse the LLM response with lib/parse-llm-response.ts — it must
  *      tolerate prose, fences, and bare code so a misbehaving model
  *      never crashes the route.
- *   7. Cache the parsed result under the problem hash.
- *   8. Return { code, steps, lines, latency, fromCache }.
+ *   7. Cache the parsed result under {provider, problemHash}.
+ *   8. Return { code, steps, lines, latency, fromCache, provider }.
  *
  * Failure modes:
  *   - 400: malformed body / empty problem
  *   - 401: invite code rejected
- *   - 500: LLM failed after retries (error.retryable reflects whether the
- *     client should show "再试一次" — false for parse / 4xx, true for 5xx)
+ *   - 500: LLM failed on every configured provider (error.retryable
+ *     reflects whether the underlying error was transient)
  *   - 502: LLM returned unusable output (no code at all, even after
  *     tolerant parsing)
  *
@@ -32,11 +37,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { getLLMClient, resolveModel, DEFAULT_TEMPERATURE } from "@/lib/llm-client";
 import { buildSystemPrompt, buildUserPrompt } from "@/lib/llm-prompt";
-import { withRetry } from "@/lib/llm-retry";
+import { callLlmWithFallback } from "@/lib/llm-fallback";
 import { validateInviteCode } from "@/lib/invite";
-import { getCachedResult, setCachedResult } from "@/lib/cache";
+import { getCachedResult, setCachedResult, buildCacheKey } from "@/lib/cache";
 import { parseLlmResponse } from "@/lib/parse-llm-response";
 import type {
   ErrorResponse,
@@ -74,29 +78,44 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ---------- 3. Hash the problem ----------
   const problemHash = sha256(problem);
 
-  // ---------- 4. Cache lookup ----------
-  const cached = await getCachedResult(problemHash);
-  if (cached !== null) {
-    return NextResponse.json<RenderResponse>({
-      code: cached.code,
-      steps: cached.steps,
-      lines: cached.lines,
-      latency: Date.now() - startedAt,
-      fromCache: true,
-    });
+  // ---------- 4. Cache lookup (try each provider's bucket) ----------
+  // If the user already has a cached answer from any provider, serve
+  // it. We probe the primary first, then fallbacks. The provider
+  // prefix is part of the cache key so a LongCat answer and a Doubao
+  // answer for the same problem don't collide.
+  const { getProviderChain } = await import("@/lib/llm-client");
+  const chain = getProviderChain();
+  for (const provider of chain) {
+    const cached = await getCachedResult(buildCacheKey(`${provider.name}:${problemHash}`));
+    if (cached !== null) {
+      return NextResponse.json<RenderResponse>({
+        code: cached.code,
+        steps: cached.steps,
+        lines: cached.lines,
+        latency: Date.now() - startedAt,
+        fromCache: true,
+        provider: provider.name,
+      });
+    }
   }
 
-  // ---------- 5. LLM call (with retry) ----------
+  // ---------- 5. LLM call (primary + fallback, fail-fast) ----------
+  let usedProvider = "primary";
   let rawLlm: string;
   try {
-    rawLlm = await withRetry(() => callLlm(problem));
+    const result = await callLlmWithFallback(
+      buildSystemPrompt(),
+      buildUserPrompt(problem),
+    );
+    rawLlm = result.content;
+    usedProvider = result.provider;
   } catch (err) {
     const retryable = isUpstreamRetryable(err);
     const message = retryable
       ? "AI 生成失败，请再试一次"
       : "AI 生成的内容无法使用，请修改题目或稍后再试";
     // Log full err server-side; only show a friendly message to the client.
-    console.error("[render] LLM failed:", err);
+    console.error("[render] All LLM providers failed:", err);
     return jsonError(500, message, retryable);
   }
 
@@ -115,12 +134,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // ---------- 7. Cache the result (fire-and-forget on failure) ----------
-  await setCachedResult(problemHash, {
-    code: result.code,
-    steps: result.steps,
-    lines: result.lines,
-  });
+  // ---------- 7. Cache the result under THIS provider's bucket ----------
+  await setCachedResult(
+    buildCacheKey(`${usedProvider}:${problemHash}`),
+    {
+      code: result.code,
+      steps: result.steps,
+      lines: result.lines,
+    },
+  );
 
   // ---------- 8. Respond ----------
   return NextResponse.json<RenderResponse>({
@@ -129,6 +151,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     lines: result.lines,
     latency: Date.now() - startedAt,
     fromCache: false,
+    provider: usedProvider,
   });
 }
 
@@ -174,25 +197,6 @@ function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-async function callLlm(problem: string): Promise<string> {
-  const client = getLLMClient();
-
-  const completion = await client.chat.completions.create({
-    model: resolveModel(),
-    temperature: DEFAULT_TEMPERATURE,
-    messages: [
-      { role: "system", content: buildSystemPrompt() },
-      { role: "user", content: buildUserPrompt(problem) },
-    ],
-  });
-
-  const raw = completion.choices[0]?.message?.content;
-  if (typeof raw !== "string" || raw.trim().length === 0) {
-    throw new Error("LLM returned empty content");
-  }
-  return raw;
-}
-
 /**
  * Sanity check that the LLM actually produced code, not an apology or a
  * markdown-wrapped explanation. We accept the module if it contains the
@@ -216,6 +220,6 @@ function isUpstreamRetryable(err: unknown): boolean {
   ) {
     return true;
   }
-  // Our own thrown Error from callLlm (empty content) — non-retryable.
+  // Our own thrown Error from callOnce (empty content) — non-retryable.
   return false;
 }

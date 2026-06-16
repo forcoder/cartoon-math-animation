@@ -9,21 +9,29 @@
  * Retry budget: 1 (so a maximum of 2 total attempts). Design doc says
  * "first-pass success ≥ 60%, with 1 retry → ≥ 90%". A second retry would
  * push latency past 60s and yield diminishing returns.
+ *
+ * IMPORTANT: this is the per-provider retry — only retries errors that
+ * are likely to clear on a fresh request to the SAME provider. 429
+ * rate limits are NOT retried here; `callLlmWithFallback` in
+ * `lib/llm-fallback.ts` is the layer that switches providers on 429.
+ * Retrying 429 against the same provider just wastes time.
  */
 
 const RETRY_DELAY_MS = 500;
 const DEFAULT_MAX_RETRIES = 1;
 
 /**
- * True for errors where another attempt has a realistic chance of succeeding.
+ * True for errors where another attempt has a realistic chance of succeeding
+ * with the SAME provider.
  *
  * Retryable:
  *   - HTTP 5xx from upstream LLM
  *   - Network errors (ECONNRESET, ETIMEDOUT, fetch failures)
- *   - LLM provider's transient "server_error" / "rate_limit_error" types
+ *   - LLM provider's transient "server_error" / "timeout" types
  *
- * NOT retryable:
- *   - HTTP 4xx (bad input, auth failure — won't change on retry)
+ * NOT retryable (caller should fall through to a different provider):
+ *   - HTTP 429 (rate limit) — same provider is still rate-limited
+ *   - HTTP 4xx other than 429 (bad input, auth failure — won't change)
  *   - Parse / validation errors (the response didn't even reach the LLM
  *     or the LLM returned garbage — more attempts likely return more garbage)
  *   - AbortError (user navigated away)
@@ -44,12 +52,10 @@ export function isRetryableError(err: unknown): boolean {
     return anyErr.status >= 500 && anyErr.status < 600;
   }
 
-  // Provider rate limit / server errors expose a `type` field.
-  if (
-    anyErr.type === "rate_limit_error" ||
-    anyErr.type === "server_error" ||
-    anyErr.type === "timeout"
-  ) {
+  // Provider transient errors WITHOUT a `status` field (some SDKs only
+  // attach `type`). server_error and timeout are still transient on the
+  // same provider; rate_limit_error is NOT (handled at the chain layer).
+  if (anyErr.type === "server_error" || anyErr.type === "timeout") {
     return true;
   }
 
@@ -81,18 +87,27 @@ export function isRetryableError(err: unknown): boolean {
  *
  * Backoff: fixed 500ms between attempts. Exponential backoff is overkill
  * for a 1-retry budget and would push total latency past the 60s budget.
+ *
+ * `onAttempt` is called after every attempt (success OR failure, including
+ * the final one). Use it to record per-attempt state — the fallback chain
+ * layer in `lib/llm-fallback.ts` uses it to build its `attempts[]` log.
+ * `err` is `undefined` on success; on failure it's the thrown error.
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries: number = DEFAULT_MAX_RETRIES,
+  onAttempt?: (info: { attempt: number; err?: unknown }) => void,
 ): Promise<T> {
   let lastErr: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await fn();
+      const result = await fn();
+      onAttempt?.({ attempt, err: undefined });
+      return result;
     } catch (err) {
       lastErr = err;
+      onAttempt?.({ attempt, err });
 
       const hasBudget = attempt < maxRetries;
       if (!hasBudget || !isRetryableError(err)) {
